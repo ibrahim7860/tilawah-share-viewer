@@ -24,7 +24,12 @@ export async function fetchMistakes(token) {
   return r.json()
 }
 
-async function okJson(p) { const r = await p; if (!r.ok) throw new Error(`write ${r.status}`); return r.json() }
+async function okJson(p) {
+  const r = await p
+  if (r.status === 404) throw new RevokedError()
+  if (!r.ok) throw new Error(`write ${r.status}`)
+  return r.json()
+}
 export const addMistake = (token, mark) => okJson(req('POST', '/api/share/view/mistakes', token, mark))
 export const updateMistake = (token, mark) => okJson(req('PUT', '/api/share/view/mistakes', token, mark))
 export const deleteMistake = (token, mark) => okJson(req('DELETE', '/api/share/view/mistakes', token, mark))

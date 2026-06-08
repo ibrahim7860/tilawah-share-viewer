@@ -10,13 +10,18 @@ export function removeMark(list, key) {
   return list.filter((x) => keyOf(x) !== key)
 }
 
-/** Apply `next` immediately; if apiCall rejects, restore `prev` and call onError. */
-export async function applyWithRollback({ prev, next, setState, apiCall, onError }) {
-  setState(next)
+/**
+ * Apply an optimistic change via a functional updater; if apiCall rejects,
+ * invert ONLY that change with another functional updater so concurrent edits
+ * made in the meantime survive. `apply` and `revert` each take the current
+ * state and return the next state.
+ */
+export async function applyWithRollback({ apply, revert, setState, apiCall, onError }) {
+  setState(apply)
   try {
     await apiCall()
   } catch (e) {
-    setState(prev)
+    setState(revert)
     onError?.(e)
   }
 }

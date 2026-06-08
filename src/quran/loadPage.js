@@ -15,10 +15,12 @@ export async function loadPage(pageNumber) {
 }
 
 async function loadFont(pageNumber) {
+  if (typeof FontFace === 'undefined' || !document.fonts) return
   const family = `p${pageNumber}`
   if (fontCache.has(family)) return
   const face = new FontFace(family, `url(/fonts/${family}.woff2)`)
-  await face.load()
+  const loaded = await face.load().catch(() => null)
+  if (!loaded) return // missing font degrades to a fallback; don't cache the failure
   document.fonts.add(face)
   fontCache.add(family)
 }

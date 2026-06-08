@@ -21,6 +21,18 @@ export default function App() {
   const [selected, setSelected] = useState(null)
   const [undo, setUndo] = useState(null)
   const [helpOpen, setHelpOpen] = useState(false)
+  const [pageError, setPageError] = useState(false)
+  const [toast, setToast] = useState(null)
+
+  const showToast = (msg) => {
+    setToast(msg)
+    setTimeout(() => setToast((cur) => (cur === msg ? null : cur)), 4000)
+  }
+
+  const onWriteError = (e) => {
+    if (e instanceof RevokedError) setStatus('revoked')
+    else showToast("Couldn't save — please retry")
+  }
 
   useEffect(() => {
     if (!token) { setStatus('badtoken'); return }
@@ -28,14 +40,21 @@ export default function App() {
       try {
         const m = await fetchMeta(token)
         if (m.mushafPref && m.mushafPref !== 'MADINA15') { setMeta(m); setStatus('unsupported'); return }
-        setMeta(m); setPageNumber(m.startPage || 1)
+        setMeta(m); setPageNumber(Math.min(604, Math.max(1, m.startPage || 1)))
         setMarks(await fetchMistakes(token))
         setStatus('ready')
       } catch (e) { setStatus(e instanceof RevokedError ? 'revoked' : 'badtoken') }
     })()
   }, [token])
 
-  useEffect(() => { if (status === 'ready') loadPage(pageNumber).then(setPage).catch(() => {}) }, [pageNumber, status])
+  useEffect(() => {
+    if (status !== 'ready') return
+    let active = true
+    loadPage(pageNumber)
+      .then((d) => { if (active) { setPage(d); setPageError(false) } })
+      .catch(() => { if (active) { setPage(null); setPageError(true) } })
+    return () => { active = false }
+  }, [pageNumber, status])
 
   if (status === 'badtoken') return <ErrorScreen kind="invalid" />
   if (status === 'revoked') return <ErrorScreen kind="revoked" />
@@ -62,37 +81,45 @@ export default function App() {
     const kv = verseKeyFor(page, selected.word); if (!kv) { setSelected(null); return }
     const [s, a] = kv
     const mark = { surah: s, ayah: a, startWordIndex: selected.word.position, endWordIndex: selected.word.position, note }
-    const next = upsertMark(marks, mark)
     setSelected(null)
     await applyWithRollback({
-      prev: marks, next, setState: setMarks,
+      apply: (cur) => upsertMark(cur, mark),
+      revert: (cur) => removeMark(cur, keyOf(mark)),
+      setState: setMarks,
       apiCall: () => (note ? updateMistake(token, mark) : addMistake(token, mark)),
-      onError: () => {},
+      onError: onWriteError,
     })
   }
 
   const deleteSelected = async () => {
     const mark = selected.existing
-    const next = removeMark(marks, keyOf(mark))
     setSelected(null); setUndo(mark)
     await applyWithRollback({
-      prev: marks, next, setState: setMarks,
-      apiCall: () => deleteMistake(token, mark), onError: () => {},
+      apply: (cur) => removeMark(cur, keyOf(mark)),
+      revert: (cur) => upsertMark(cur, mark),
+      setState: setMarks,
+      apiCall: () => deleteMistake(token, mark),
+      onError: onWriteError,
     })
   }
 
   const undoDelete = async () => {
     const mark = undo; setUndo(null)
-    const next = upsertMark(marks, mark)
-    await applyWithRollback({ prev: marks, next, setState: setMarks,
-      apiCall: () => (mark.note ? updateMistake(token, mark) : addMistake(token, mark)), onError: () => {} })
+    await applyWithRollback({
+      apply: (cur) => upsertMark(cur, mark),
+      revert: (cur) => removeMark(cur, keyOf(mark)),
+      setState: setMarks,
+      apiCall: () => (mark.note ? updateMistake(token, mark) : addMistake(token, mark)),
+      onError: onWriteError,
+    })
   }
 
   return (
     <div className="app">
       <Header meta={meta} onHelp={() => setHelpOpen(true)} />
-      {!page ? <div className="page-skeleton" /> :
-        <Page page={page} pageNumber={pageNumber} marks={marks} onSelectWord={selectWord} />}
+      {page ? <Page page={page} pageNumber={pageNumber} marks={marks} onSelectWord={selectWord} />
+        : pageError ? <div className="page-error" role="alert">Couldn't load this page. Try again.</div>
+        : <div className="page-skeleton" />}
       <nav className="pager">
         <button disabled={pageNumber <= 1} onClick={() => setPageNumber((p) => p - 1)}>‹ Prev</button>
         <span>Page {pageNumber}</span>
@@ -104,6 +131,7 @@ export default function App() {
         onMark={() => markWord(null)} onSetNote={(t) => markWord(t)} onDelete={deleteSelected}
         onClose={() => setSelected(null)} />}
       {undo && <UndoSnackbar onUndo={undoDelete} onExpire={() => setUndo(null)} />}
+      {toast && <div className="toast" role="status">{toast}</div>}
     </div>
   )
 }
