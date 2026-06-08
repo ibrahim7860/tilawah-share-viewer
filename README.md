@@ -10,9 +10,11 @@ This is a static Vite + React single-page app. It talks to the Tilawah backend a
 
 ## Dev
 
-The `tilawah` app repo must be checked out next to this one (see
-[Build-time dependency](#build-time-dependency-on-tilawah)) — the dev server reads
-Qur'an page data and fonts that the build step extracts from it.
+The Qur'an page data and fonts are **committed to this repo** (`public/pages/` and
+`public/fonts/`, fonts via Git LFS), so the dev server and build work standalone —
+no sibling `../tilawah` checkout required. Make sure Git LFS is installed
+(`git lfs install`) so the font files are pulled as real `.woff2` files, not LFS
+pointers.
 
 ```bash
 npm install
@@ -34,25 +36,31 @@ directly on the backend via `POST /api/share/link`.
 npm run build
 ```
 
-`build` first runs a `prebuild` step (`scripts/extract-quran-assets.mjs`) that
-extracts the 604 per-page JSON files and Arabic fonts from the sibling `../tilawah`
-app into `public/pages/` and `public/fonts/`. Then `vite build` emits the static
-site into `dist/`.
+`build` runs only `vite build`, which copies the committed `public/` (604 per-page
+JSON files + Arabic fonts) into the static site under `dist/`. **No `../tilawah`
+checkout is required at build/deploy time** — the assets ship with this repo.
 
-### Build-time dependency on `../tilawah`
+### Regenerating assets (`npm run extract`)
 
-The page data and fonts are **not** stored in this repo (`public/pages` and
-`public/fonts` are gitignored). They are extracted at build time from the
-`tilawah` mobile-app repo, which **must be checked out next to this one**:
+The page data (`public/pages/p{1..604}.json`) and fonts
+(`public/fonts/p{1..604}.woff2`) are **committed to this repo** — page JSON
+directly, fonts via **Git LFS**. They are no longer extracted during `build`.
+
+When the source Qur'an data in the `tilawah` mobile app changes, regenerate the
+committed assets locally and commit the result:
+
+```bash
+npm run extract   # runs scripts/extract-quran-assets.mjs, reads from ../tilawah
+git add public/pages public/fonts && git commit -m "chore: regenerate Quran assets"
+```
+
+`npm run extract` requires the `tilawah` app repo checked out next to this one:
 
 ```
 tilawah-workspace/
-├── tilawah/                ← required at build time (page JSON + fonts)
+├── tilawah/                ← only needed for `npm run extract`
 └── tilawah-share-viewer/   ← this repo
 ```
-
-If `../tilawah` is missing, the `prebuild` step fails and the build will not
-produce a working `dist/`.
 
 ## Deploy
 
