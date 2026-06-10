@@ -91,3 +91,22 @@ describe('styles.css palette canary', () => {
     }
   })
 })
+
+// Regression: the page container is dir="rtl", so ayah lines must use plain
+// `row` — `row-reverse` (the RN app's value, valid only without an RTL
+// context) double-reverses and renders every ayah backwards.
+describe('styles.css mushaf line direction + connected script', () => {
+  // comments stripped — only live declarations count
+  const css = readFileSync(resolve(process.cwd(), 'src/styles.css'), 'utf8')
+    .replace(/\/\*[\s\S]*?\*\//g, '').toLowerCase()
+  it('never uses row-reverse', () => {
+    expect(css).not.toContain('row-reverse')
+  })
+  it('keeps words flush: no flex gap on centered ayah lines', () => {
+    const centered = css.match(/\.ayah-line\.centered\s*{[^}]*}/)?.[0] ?? ''
+    expect(centered).not.toContain('gap:')
+  })
+  it('ships the dark-mode surah border ornament', () => {
+    expect(css).toContain('surahborder-darkmode.png')
+  })
+})

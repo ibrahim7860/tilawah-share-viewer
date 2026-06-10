@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { readToken } from './token.js'
 import { fetchMeta, fetchMistakes, addMistake, updateMistake, deleteMistake, RevokedError } from './api.js'
 import { loadPage, fontFamilyFor } from './quran/loadPage.js'
@@ -34,6 +34,52 @@ export default function App() {
 
   const goToPage = (n) => setPageNumber(clampPage(n))
 
+  // Touch page flipping on the mushaf itself (RTL flip: swipe right → next
+  // page, swipe left → previous). Vertical scrolling stays native.
+  const touchStart = useRef(null)
+  const swipedAt = useRef(0)
+  const onTouchStart = (e) => {
+    swipedAt.current = 0 // a fresh touch ends the post-swipe click swallow
+    // Single-finger only: a pinch's second finger must not register as a
+    // swipe between two different fingers.
+    if (e.touches.length > 1) { touchStart.current = null; return }
+    const t = e.touches[0]
+    touchStart.current = { x: t.clientX, y: t.clientY }
+  }
+  const onTouchEnd = (e) => {
+    const s = touchStart.current
+    if (e.touches.length > 0) return // other fingers still down (pinch)
+    touchStart.current = null
+    if (!s || document.querySelector('[role="dialog"]')) return
+    const t = e.changedTouches[0]
+    const dx = t.clientX - s.x
+    const dy = t.clientY - s.y
+    if (Math.abs(dx) > 56 && Math.abs(dx) > 1.8 * Math.abs(dy)) {
+      swipedAt.current = Date.now()
+      setPageNumber((p) => clampPage(p + (dx > 0 ? 1 : -1)))
+    }
+  }
+
+  // Mouse drag flipping (desktop parity with the touch swipe — same RTL
+  // direction and thresholds). pointerType-gated so touch pointers stay with
+  // the touch handlers above and never double-fire.
+  const onPointerDown = (e) => {
+    if (e.pointerType !== 'mouse' || e.button !== 0) return
+    swipedAt.current = 0 // a fresh press ends the post-drag click swallow
+    const start = { x: e.clientX, y: e.clientY }
+    // The drag may end outside the zone (or even the window) — resolve it on
+    // a one-shot global pointerup instead of the zone's own.
+    window.addEventListener('pointerup', (up) => {
+      if (document.querySelector('[role="dialog"]')) return
+      const dx = up.clientX - start.x
+      const dy = up.clientY - start.y
+      if (Math.abs(dx) > 56 && Math.abs(dx) > 1.8 * Math.abs(dy)) {
+        swipedAt.current = Date.now() // the drag's trailing click must not mark a word
+        setPageNumber((p) => clampPage(p + (dx > 0 ? 1 : -1)))
+      }
+    }, { once: true })
+  }
+
   const showToast = (msg) => {
     setToast(msg)
     setTimeout(() => setToast((cur) => (cur === msg ? null : cur)), 4000)
@@ -59,6 +105,59 @@ export default function App() {
     })()
   }, [token])
 
+  // Trackpad two-finger horizontal swipe (laptop parity with the touch
+  // swipe). Native non-passive listener: React delegates wheel as passive, and
+  // we must preventDefault so the browser doesn't read the swipe as history
+  // back/forward and navigate away from the share view.
+  const pageZoneRef = useRef(null)
+  useEffect(() => {
+    if (status !== 'ready') return
+    const zone = pageZoneRef.current
+    if (!zone) return
+    let acc = 0          // deltaX accumulated within the current gesture
+    let last = 0         // timestamp of the previous horizontal wheel event
+    let lockedUntil = 0  // swallows the inertia tail after a flip
+    const onWheel = (e) => {
+      if (Math.abs(e.deltaX) <= Math.abs(e.deltaY)) return // vertical: not ours
+      if (document.querySelector('[role="dialog"]')) return
+      e.preventDefault()
+      const now = e.timeStamp
+      if (now - last > 300) acc = 0 // a quiet gap starts a new gesture
+      last = now
+      // One flip per continuous gesture: inertial deltas keep extending the
+      // lock, so it only clears after the trackpad actually goes quiet.
+      if (now < lockedUntil) { lockedUntil = now + 250; return }
+      acc += e.deltaX
+      if (Math.abs(acc) >= 110) {
+        // Natural scrolling: fingers moving right report deltaX < 0 — the
+        // same physical motion as the touch swipe right = next page (RTL).
+        // (Direction captured NOW: the state updater runs after acc resets.)
+        const dir = acc < 0 ? 1 : -1
+        acc = 0
+        lockedUntil = now + 250
+        setPageNumber((p) => clampPage(p + dir))
+      }
+    }
+    zone.addEventListener('wheel', onWheel, { passive: false })
+    return () => zone.removeEventListener('wheel', onWheel)
+  }, [status])
+
+  // Keyboard page flipping (RTL book: ← advances, → goes back). Inert while
+  // any dialog is open or the focus is in a text field.
+  useEffect(() => {
+    if (status !== 'ready') return
+    const onKey = (e) => {
+      if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return
+      if (e.altKey || e.metaKey || e.ctrlKey) return // browser history shortcuts
+      if (document.querySelector('[role="dialog"]')) return
+      const tag = e.target?.tagName
+      if (tag === 'INPUT' || tag === 'TEXTAREA') return
+      setPageNumber((p) => clampPage(p + (e.key === 'ArrowLeft' ? 1 : -1)))
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [status])
+
   useEffect(() => {
     if (status !== 'ready') return
     let active = true
@@ -78,6 +177,8 @@ export default function App() {
   }
 
   const selectWord = (word, pg) => {
+    // A swipe that ends on a word also fires its click — swallow it.
+    if (Date.now() - swipedAt.current < 350) return
     const existing = marks.find((mk) => wordInMark(pg, word, mk))
     setSelected({ word, existing })
   }
@@ -154,13 +255,18 @@ export default function App() {
   return (
     <div className="app">
       <Header meta={meta} onBrowse={() => setBrowseOpen(true)} onHelp={() => setHelpOpen(true)} />
-      {page ? <Page page={page} pageNumber={pageNumber} marks={marks} preview={previewMark} onSelectWord={selectWord} />
-        : pageError ? <div className="page-error" role="alert">Couldn't load this page. Try again.</div>
-        : <div className="page-skeleton" />}
+      <div className="page-zone" ref={pageZoneRef}
+           onTouchStart={onTouchStart} onTouchEnd={onTouchEnd} onPointerDown={onPointerDown}>
+        {page ? <Page page={page} pageNumber={pageNumber} marks={marks} preview={previewMark} onSelectWord={selectWord} />
+          : pageError ? <div className="page-error" role="alert">Couldn't load this page. Try again.</div>
+          : <div className="page-skeleton" />}
+      </div>
       <nav className="pager">
         <button className="pager-chevron" aria-label="Previous page" disabled={pageNumber <= 1}
                 onClick={() => setPageNumber((p) => p - 1)}>‹</button>
-        <button className="page-pill" onClick={() => setBrowseOpen(true)}>Page {pageNumber}</button>
+        <button className="page-pill" onClick={() => setBrowseOpen(true)}>
+          Page {pageNumber}<span className="page-total"> / {TOTAL_PAGES}</span>
+        </button>
         <button className="pager-chevron" aria-label="Next page" disabled={pageNumber >= TOTAL_PAGES}
                 onClick={() => setPageNumber((p) => p + 1)}>›</button>
       </nav>

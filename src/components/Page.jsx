@@ -3,10 +3,6 @@ import { wordBackground, wordInMark } from '../quran/highlight.js'
 import { fontFamilyFor } from '../quran/loadPage.js'
 import { buildPageLayout, TOTAL_LINES, surahName } from '../quran/mushafLayout.js'
 
-// Centered lines add this gap between words (mirror of .ayah-line.centered's
-// `gap: 1.5cqw` — 1.5% of the page's inline size).
-const CENTER_GAP_RATIO = 0.015
-
 /**
  * Renders one page as a proper Madani-mushaf page: a fixed 15-line grid where
  * ayah lines are justified edge-to-edge (centered when they're a surah's final
@@ -68,23 +64,30 @@ function Line({ line, page, family, marks, preview, onSelectWord }) {
 
 function AyahLine({ line, page, family, marks, preview, onSelectWord }) {
   const ref = useRef(null)
-  // A surah's FULL final line must fall back to justified (printed-mushaf
-  // behavior: centering only manifests when the line is short) — otherwise
-  // the centering gap pushes glyphs past the page edge. Measured from the
-  // words' intrinsic widths so the result is independent of the class
-  // currently applied (no feedback loop).
+  // Two width-driven fallbacks, both measured from the words' intrinsic
+  // widths (offsetWidth + overlap margin) so they're independent of what's
+  // currently applied (no feedback loop):
+  //  - `fits`: a surah's FULL final line falls back to justified
+  //    (printed-mushaf behavior: centering only manifests on short lines).
+  //  - `fit`:  a line whose natural QCF width exceeds the container gets its
+  //    font scaled down to fit — a handful of dense lines per mushaf —
+  //    instead of clipping glyphs at the page edge.
   const [fits, setFits] = useState(true)
+  const [fit, setFit] = useState(1)
+  const fitRef = useRef(1)
   useLayoutEffect(() => {
-    if (!line.centered) return
     const el = ref.current
     if (!el) return
     const check = () => {
-      const pageEl = el.closest('.page')
-      if (!pageEl) return
-      const gap = pageEl.clientWidth * CENTER_GAP_RATIO
-      const needed = [...el.children].reduce((sum, c) => sum + c.offsetWidth, 0) +
-        gap * Math.max(0, el.children.length - 1)
-      setFits(needed <= el.clientWidth + 1)
+      const measured = [...el.children].reduce((sum, c) =>
+        sum + c.offsetWidth + (parseFloat(getComputedStyle(c).marginLeft) || 0), 0)
+      // De-scale to the natural width at --fit:1 (slightly conservative:
+      // the cqw-based paddings don't scale with the font).
+      const natural = measured / fitRef.current
+      const w = el.clientWidth
+      setFits(natural <= w + 1)
+      const s = natural > w + 1 ? Math.max(0.75, w / natural) : 1
+      if (Math.abs(s - fitRef.current) > 0.005) { fitRef.current = s; setFit(s) }
     }
     check()
     if (typeof ResizeObserver === 'undefined') return
@@ -95,7 +98,11 @@ function AyahLine({ line, page, family, marks, preview, onSelectWord }) {
 
   const centered = line.centered && fits
   return (
-    <div ref={ref} className={centered ? 'ayah-line centered' : 'ayah-line'}>
+    <div
+      ref={ref}
+      className={centered ? 'ayah-line centered' : 'ayah-line'}
+      style={fit < 1 ? { '--fit': fit } : undefined}
+    >
       {line.words.map((w) => {
         const bg = (preview && wordInMark(page, w, preview))
           ? preview.color

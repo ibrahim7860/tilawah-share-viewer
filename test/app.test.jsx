@@ -336,3 +336,89 @@ describe('App browse navigation', () => {
     await waitFor(() => expect(screen.queryByRole('dialog', { name: "Browse the Qur'an" })).toBeNull())
   })
 })
+
+describe('App page flipping (keyboard + swipe, RTL book order)', () => {
+  it('ArrowLeft advances, ArrowRight goes back, and the pill shows N / 604', async () => {
+    const { container } = render(<App />)
+    await screen.findByRole('button', { name: "Qur'an word" })
+    expect(container.querySelector('.page-pill').textContent).toBe('Page 1 / 604')
+    fireEvent.keyDown(window, { key: 'ArrowLeft' })
+    await waitFor(() => expect(screen.getByRole('button', { name: /Page 2/ })).toBeTruthy())
+    fireEvent.keyDown(window, { key: 'ArrowRight' })
+    await waitFor(() => expect(screen.getByRole('button', { name: /Page 1/ })).toBeTruthy())
+  })
+
+  it('arrow keys are inert while a dialog is open (no page flip behind a modal)', async () => {
+    await renderAndOpenModal()
+    fireEvent.keyDown(window, { key: 'ArrowLeft' })
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+    expect(screen.getByRole('button', { name: /Page 1/ })).toBeTruthy()
+  })
+
+  it('a horizontal right-swipe flips to the next page; the trailing tap is swallowed', async () => {
+    const { container } = render(<App />)
+    await screen.findByRole('button', { name: "Qur'an word" })
+    const zone = container.querySelector('.page-zone')
+    fireEvent.touchStart(zone, { touches: [{ clientX: 100, clientY: 300 }] })
+    fireEvent.touchEnd(zone, { changedTouches: [{ clientX: 220, clientY: 300 }] })
+    await waitFor(() => expect(screen.getByRole('button', { name: /Page 2/ })).toBeTruthy())
+    // the click that lands right after the swipe must not open the modal
+    fireEvent.click(screen.getByRole('button', { name: "Qur'an word" }))
+    expect(screen.queryByRole('dialog', { name: 'Edit Note' })).toBeNull()
+  })
+
+  it('a mostly-vertical drag does NOT flip the page (scrolling stays native)', async () => {
+    const { container } = render(<App />)
+    await screen.findByRole('button', { name: "Qur'an word" })
+    const zone = container.querySelector('.page-zone')
+    fireEvent.touchStart(zone, { touches: [{ clientX: 100, clientY: 100 }] })
+    fireEvent.touchEnd(zone, { changedTouches: [{ clientX: 170, clientY: 400 }] })
+    expect(screen.getByRole('button', { name: /Page 1/ })).toBeTruthy()
+  })
+
+  it('a mouse drag right flips to the next page; the trailing click is swallowed', async () => {
+    const { container } = render(<App />)
+    await screen.findByRole('button', { name: "Qur'an word" })
+    const zone = container.querySelector('.page-zone')
+    fireEvent.pointerDown(zone, { pointerType: 'mouse', button: 0, clientX: 100, clientY: 300 })
+    fireEvent.pointerUp(window, { pointerType: 'mouse', clientX: 230, clientY: 300 })
+    await waitFor(() => expect(screen.getByRole('button', { name: /Page 2/ })).toBeTruthy())
+    // the click that lands when the drag releases must not open the modal
+    fireEvent.click(screen.getByRole('button', { name: "Qur'an word" }))
+    expect(screen.queryByRole('dialog', { name: 'Edit Note' })).toBeNull()
+  })
+
+  it('a plain mouse press (no movement) still lets the word click open the modal', async () => {
+    const { container } = render(<App />)
+    const word = await screen.findByRole('button', { name: "Qur'an word" })
+    const zone = container.querySelector('.page-zone')
+    fireEvent.pointerDown(zone, { pointerType: 'mouse', button: 0, clientX: 100, clientY: 300 })
+    fireEvent.pointerUp(window, { pointerType: 'mouse', clientX: 102, clientY: 301 })
+    fireEvent.click(word)
+    expect(await screen.findByRole('dialog', { name: 'Edit Note' })).toBeTruthy()
+  })
+
+  it('a horizontal trackpad swipe flips exactly one page (inertia tail swallowed)', async () => {
+    const { container } = render(<App />)
+    await screen.findByRole('button', { name: "Qur'an word" })
+    const zone = container.querySelector('.page-zone')
+    // natural scrolling: fingers right → deltaX < 0 → next page (RTL)
+    fireEvent.wheel(zone, { deltaX: -120, deltaY: 0 })
+    await waitFor(() => expect(screen.getByRole('button', { name: /Page 2/ })).toBeTruthy())
+    // the inertia tail right after the flip must not flip again
+    fireEvent.wheel(zone, { deltaX: -120, deltaY: 0 })
+    fireEvent.wheel(zone, { deltaX: -120, deltaY: 0 })
+    expect(screen.getByRole('button', { name: /Page 2/ })).toBeTruthy()
+  })
+
+  it('vertical trackpad scrolling never flips pages', async () => {
+    const { container } = render(<App />)
+    await screen.findByRole('button', { name: "Qur'an word" })
+    const zone = container.querySelector('.page-zone')
+    fireEvent.wheel(zone, { deltaX: -40, deltaY: -300 })
+    fireEvent.wheel(zone, { deltaX: -40, deltaY: -300 })
+    fireEvent.wheel(zone, { deltaX: -40, deltaY: -300 })
+    expect(screen.getByRole('button', { name: /Page 1/ })).toBeTruthy()
+  })
+})
