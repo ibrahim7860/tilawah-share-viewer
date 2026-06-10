@@ -1,11 +1,42 @@
+/* Tilawah app design system, ported (tokens extracted from ThemeContext.js /
+   ReadingScreen.js). Light + dark via prefers-color-scheme; highlight colors
+   are scheme-invariant (matches the app). */
 :root {
-  --bg: #fdfcf7;
-  --surface: #fffefb;
-  --ink: #2a2722;
-  --ink-soft: #6b655c;
-  --line: #e7e1d4;
-  --accent: #7d5a3e;
-  --shadow: 0 8px 28px rgba(60, 50, 35, 0.12);
+  --page-bg: #FDFCF3;
+  --text: #000000;
+  --text-soft: #666666;
+  --surface: #FFFFFF;
+  --line: rgba(0, 0, 0, 0.08);
+  --word-hover: rgba(0, 0, 0, 0.06);
+  --modal-bg: #1F2621;
+  --modal-input-bg: #121714;
+  --mint: #C9EDD6;
+  --mint-strong: #69D994;
+  --mint-on: #121714;
+  --overlay: rgba(0, 0, 0, 0.4);
+  --ios-blue: #007AFF;
+  --float-bg: rgba(255, 255, 255, 0.85);
+  --badge-bg: rgba(0, 0, 0, 0.7);
+  --danger: #B3261E;          /* on light surfaces (AA on white) */
+  --danger-on-dark: #FF6363;  /* on the dark modal/olive surfaces */
+  --danger-bg: #B3261E;
+  --skeleton-a: #F3F1E6;
+  --skeleton-b: #FAF8EE;
+  --card-shadow: 0 2px 4px rgba(0, 0, 0, 0.25);
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --page-bg: #1E1E1E;
+    --text: #E8E8E8;
+    --text-soft: #999999;
+    --surface: #2A2A2A;
+    --line: rgba(255, 255, 255, 0.12);
+    --word-hover: rgba(255, 255, 255, 0.08);
+    --float-bg: rgba(60, 60, 60, 0.85);
+    --danger: #FF6363;
+    --skeleton-a: #262626;
+    --skeleton-b: #303030;
+  }
 }
 
 * { box-sizing: border-box; }
@@ -13,111 +44,214 @@
 html, body {
   margin: 0;
   padding: 0;
-  background: var(--bg);
-  color: var(--ink);
-  font-family: 'Iowan Old Style', 'Palatino Linotype', Palatino, Georgia, serif;
+  background: var(--page-bg);
+  color: var(--text);
+  font-family: 'Be Vietnam Pro', system-ui, sans-serif;
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
 }
 
+button { font-family: inherit; }
+button:active { opacity: 0.7; }
+
+/* Keyboard focus: a clearly visible ring on every interactive element;
+   mint ring on the dark modal surfaces where blue would vanish. */
+:focus-visible { outline: 2px solid var(--ios-blue); outline-offset: 2px; }
+.modal :focus-visible, .snackbar :focus-visible { outline-color: var(--mint-strong); }
+/* The dialog card receives programmatic focus on open — no ring on the
+   container itself; keyboard focus rings live on its inner controls. */
+.modal:focus, .modal:focus-visible, .drawer:focus, .drawer:focus-visible { outline: none; }
+
+/* Pointer hover affordance (touch devices skip these entirely). */
+@media (hover: hover) {
+  .float-button:hover,
+  .pager-chevron:hover:not(:disabled),
+  .page-pill:hover,
+  .modal-primary:hover,
+  .drawer-jump button:hover,
+  .edit-note-action:hover,
+  .edit-note-remove:hover { filter: brightness(1.08); }
+  .chip:hover:not(.active) { background: rgba(201, 237, 214, 0.12); }
+  .drawer-tabs button:hover:not(.active) { background: var(--word-hover); }
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* Phone-proportioned column like the app; full-bleed on small screens. */
 .app {
-  max-width: 760px;
+  max-width: 430px;
   margin: 0 auto;
-  padding: 0 16px 96px;
+  padding: calc(64px + env(safe-area-inset-top)) 12px calc(96px + env(safe-area-inset-bottom));
   min-height: 100vh;
 }
 
-/* ---------- Header ---------- */
-.header {
-  position: sticky;
-  top: 0;
-  z-index: 20;
+/* ---------- Floating reading chrome (app parity: no header bar) ---------- */
+.chrome-top {
+  position: fixed;
+  top: calc(12px + env(safe-area-inset-top));
+  left: 12px;
+  right: 12px;
+  z-index: 30;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
-  padding: 12px 4px;
-  margin-bottom: 8px;
-  background: linear-gradient(var(--bg) 70%, rgba(253, 252, 247, 0));
-  border-bottom: 1px solid var(--line);
+  gap: 8px;
 }
 
-.header-owner { display: flex; align-items: center; gap: 12px; min-width: 0; }
-
-.avatar {
+.float-button {
+  flex: none;
   width: 40px;
   height: 40px;
-  flex: none;
   border-radius: 50%;
-  background: var(--accent);
-  color: #fff;
-  display: flex;
-  align-items: center;
-  justify-content: center;
+  border: none;
+  background: var(--float-bg);
+  color: var(--ios-blue);
   font-size: 18px;
   font-weight: 600;
-  letter-spacing: 0.02em;
-}
-
-.header-text { display: flex; flex-direction: column; min-width: 0; }
-.owner-name { font-size: 17px; font-weight: 600; color: var(--ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.shared-tag { font-size: 12px; color: var(--ink-soft); letter-spacing: 0.04em; text-transform: lowercase; }
-
-.help-button {
-  flex: none;
-  width: 36px;
-  height: 36px;
-  border-radius: 50%;
-  border: 1px solid var(--line);
-  background: var(--surface);
-  color: var(--ink-soft);
-  font-size: 18px;
   cursor: pointer;
-  transition: border-color 0.15s, color 0.15s;
+  box-shadow: var(--card-shadow);
+  -webkit-backdrop-filter: blur(4px);
+  backdrop-filter: blur(4px);
 }
-.help-button:hover { border-color: var(--accent); color: var(--accent); }
 
-/* ---------- Page ---------- */
+.owner-pill {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  min-width: 0;
+  padding: 5px 16px;
+  background: var(--badge-bg);
+  color: #fff;
+  border-radius: 25px;
+}
+.owner-pill-name {
+  max-width: 48vw;
+  font-size: 14px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.owner-pill-tag { font-size: 11px; opacity: 0.9; }
+
+/* ---------- Quran fonts ---------- */
+/* Subset of Amiri (surah names + سورة + ﷽ only, 34KB vs the 440KB full TTF);
+   regenerate with scripts/subset-amiri.mjs after changing banner text. */
+@font-face {
+  font-family: 'Amiri';
+  src: url(/fonts/Amiri-Subset.woff2) format('woff2');
+  font-display: swap;
+}
+
+/* ---------- Page (Madani mushaf: fixed 15-line grid) ---------- */
+/* App parity: flat page, same color as the screen behind it — seamless. */
 .page {
-  background: var(--surface);
-  border: 1px solid var(--line);
-  border-radius: 12px;
-  box-shadow: var(--shadow);
-  padding: 28px 20px;
-  margin: 8px 0 24px;
+  container-type: inline-size;
+  width: 100%;
+  max-width: 406px;
+  aspect-ratio: 0.63;            /* portrait page proportion */
+  margin: 8px auto 20px;
+  padding: 2.5cqw 3.5cqw;
+  background: var(--page-bg);
+  border-radius: 8px;
+  display: flex;
+  flex-direction: column;
 }
 
-.line {
+/* Short special pages (1–2): center occupied lines vertically. */
+.page.page-centered { justify-content: center; }
+.page.page-centered .mushaf-line { flex: 0 0 calc(100% / 15); }
+
+/* one of the 15 equal-height line slots */
+.mushaf-line {
+  flex: 1 1 0;
+  min-height: 0;
+  display: flex;
+  align-items: center;
+}
+
+.ayah-line {
   display: flex;
   flex-direction: row-reverse;
-  justify-content: center;
-  flex-wrap: wrap;
+  justify-content: space-between;   /* justified edge-to-edge */
+  align-items: center;
+  width: 100%;
 }
+.ayah-line.centered { justify-content: center; gap: 1.5cqw; }
 
 .word {
-  min-width: 44px;
-  min-height: 44px;
+  position: relative;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   border: none;
   cursor: pointer;
-  font-size: 28px;
-  line-height: 1.9;
-  padding: 0 2px;
-  color: var(--ink);
-  border-radius: 6px;
+  background: transparent;
+  font-size: 6.2cqw;
+  line-height: 1;
+  padding: 0.4cqw 0.3cqw;
+  color: var(--text);
+  border-radius: 5px;
   transition: background-color 0.12s;
 }
-.word:hover { background-color: rgba(125, 90, 62, 0.08) !important; }
+/* Invisible VERTICAL hit-slop: claims the dead gap between line slots so
+   near-miss taps land on the intended word (horizontal untouched — adjacent
+   words must not fight). */
+.word::after {
+  content: '';
+  position: absolute;
+  inset: -1.8cqw 0;
+}
+/* Layer the hover tint OVER any highlight color (inset shadow paints above
+   the background), instead of replacing the mark color under the cursor. */
+.word:hover { box-shadow: inset 0 0 0 100vmax var(--word-hover); }
+
+/* surah-name banner + basmala lines */
+.surah-banner {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  background-image: url(/surahBorder.png);
+  background-repeat: no-repeat;
+  background-position: center;
+  background-size: contain;
+}
+.surah-banner-name {
+  font-family: 'Amiri', serif;
+  font-size: 4.4cqw;
+  line-height: 1;
+  color: var(--text);
+}
+.basmala {
+  width: 100%;
+  text-align: center;
+  font-family: 'Amiri', serif;
+  font-size: 5.6cqw;
+  line-height: 1;
+  color: var(--text);
+}
 
 /* ---------- Page skeleton ---------- */
 .page-skeleton {
-  min-height: 60vh;
-  margin: 8px 0 24px;
-  border-radius: 12px;
-  border: 1px solid var(--line);
-  background: linear-gradient(100deg, #f4f1e8 30%, #fbf9f2 50%, #f4f1e8 70%);
+  width: 100%;
+  max-width: 406px;
+  aspect-ratio: 0.63;
+  margin: 8px auto 20px;
+  border-radius: 8px;
+  background: linear-gradient(100deg, var(--skeleton-a) 30%, var(--skeleton-b) 50%, var(--skeleton-a) 70%);
   background-size: 200% 100%;
   animation: shimmer 1.4s ease-in-out infinite;
 }
@@ -126,91 +260,147 @@ html, body {
   100% { background-position: -200% 0; }
 }
 
-/* ---------- Pager ---------- */
+/* ---------- Pager (app parity: floating page pill, plus web chevrons) ---------- */
 .pager {
+  position: fixed;
+  bottom: calc(16px + env(safe-area-inset-bottom));
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 30;
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  margin-bottom: 20px;
+  gap: 10px;
 }
-.pager span { font-size: 14px; color: var(--ink-soft); }
-.pager button {
-  min-height: 44px;
-  padding: 0 18px;
-  border: 1px solid var(--line);
-  background: var(--surface);
-  color: var(--ink);
-  border-radius: 8px;
-  font-size: 15px;
+.pager-chevron {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  border: none;
+  background: var(--float-bg);
+  color: var(--ios-blue);
+  font-size: 20px;
   cursor: pointer;
-  transition: border-color 0.15s, opacity 0.15s;
+  box-shadow: var(--card-shadow);
+  -webkit-backdrop-filter: blur(4px);
+  backdrop-filter: blur(4px);
 }
-.pager button:hover:not(:disabled) { border-color: var(--accent); }
-.pager button:disabled { opacity: 0.4; cursor: default; }
-
-/* ---------- Legend ---------- */
-.legend {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 10px 16px;
-  padding: 14px 16px;
-  background: var(--surface);
-  border: 1px solid var(--line);
-  border-radius: 10px;
-}
-.legend-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 13px;
-  color: var(--ink-soft);
-}
-.legend-swatch {
-  width: 14px;
-  height: 14px;
-  border-radius: 4px;
-  flex: none;
-  border: 1px solid rgba(0, 0, 0, 0.08);
+.pager-chevron:disabled { opacity: 0.35; cursor: default; }
+.page-pill {
+  min-height: 44px;
+  padding: 0 22px;
+  white-space: nowrap;
+  border: none;
+  background: var(--badge-bg);
+  color: #fff;
+  border-radius: 25px;
+  font-size: 18px;
+  font-weight: 600;
+  cursor: pointer;
 }
 
-/* ---------- Popover ---------- */
-.popover {
+/* ---------- Browse drawer (full-Quran index) ---------- */
+.drawer {
+  width: 100%;
+  max-width: 420px;
+  max-height: 80vh;
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  padding: 12px;
   background: var(--surface);
-  border: 1px solid var(--line);
-  border-radius: 10px;
-  box-shadow: var(--shadow);
-  z-index: 50;
-  max-width: 240px;
+  border-radius: 14px;
+  box-shadow: var(--card-shadow);
+  overflow: hidden;
 }
-.popover button {
+.drawer-tabs {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 10px 10px 8px;
+  border-bottom: 1px solid var(--line);
+}
+.drawer-tablist { display: flex; align-items: center; gap: 4px; }
+.drawer-tabs button {
   min-height: 40px;
-  padding: 0 14px;
-  border: 1px solid var(--line);
-  background: var(--bg);
-  color: var(--ink);
-  border-radius: 7px;
+  padding: 0 16px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--text-soft);
+  border-radius: 20px;
   font-size: 14px;
+  font-weight: 600;
   cursor: pointer;
 }
-.popover button:hover { border-color: var(--accent); }
-.popover .danger { color: #9a3b3b; border-color: rgba(154, 59, 59, 0.3); }
-.popover .swatches {
-  display: grid;
-  grid-template-columns: repeat(2, 1fr);
-  gap: 6px;
-}
-.popover .swatches button {
-  color: var(--ink);
-  border: 1px solid rgba(0, 0, 0, 0.08);
-  font-size: 13px;
-}
+.drawer-tabs button.active { background: var(--mint); color: var(--mint-on); }
+.drawer-close { margin-left: auto; color: var(--text-soft); font-size: 16px; }
 
-/* ---------- Modal ---------- */
+.drawer-list {
+  list-style: none;
+  margin: 0;
+  padding: 6px;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+}
+.drawer-row {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 48px;
+  padding: 8px 12px;
+  border: none;
+  background: transparent;
+  color: var(--text);
+  border-radius: 8px;
+  font-size: 16px;
+  cursor: pointer;
+  text-align: left;
+}
+.drawer-row:hover { background: var(--word-hover); }
+.drawer-row.current { background: rgba(105, 217, 148, 0.18); }
+.drawer-num {
+  flex: none;
+  width: 30px;
+  text-align: center;
+  font-size: 13px;
+  color: var(--text-soft);
+}
+.drawer-name {
+  flex: 1;
+  font-size: 19px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.drawer-page { flex: none; font-size: 12px; color: var(--text-soft); }
+
+.drawer-jump { padding: 20px 16px; display: flex; flex-direction: column; gap: 10px; }
+.drawer-jump label { font-size: 14px; color: var(--text-soft); }
+.drawer-jump-row { display: flex; gap: 8px; }
+.drawer-jump input {
+  flex: 1;
+  min-height: 44px;
+  padding: 0 14px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--page-bg);
+  color: var(--text);
+  font-size: 16px;
+  font-family: inherit;
+}
+.drawer-jump button {
+  min-height: 44px;
+  padding: 0 20px;
+  border: none;
+  background: var(--mint);
+  color: var(--mint-on);
+  border-radius: 8px;
+  font-size: 15px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.drawer-jump-error { margin: 0; font-size: 13px; color: var(--danger); }
+
+/* ---------- Modal primitive (shared: Edit Note + Instructions) ---------- */
 .modal-overlay {
   position: fixed;
   inset: 0;
@@ -219,20 +409,127 @@ html, body {
   align-items: center;
   justify-content: center;
   padding: 24px;
-  background: rgba(42, 39, 34, 0.4);
+  background: var(--overlay);
+  animation: overlay-fade 200ms ease-out;
 }
 .modal {
-  width: 100%;
+  width: 90%;
   max-width: 380px;
-  background: var(--surface);
-  border-radius: 14px;
-  box-shadow: var(--shadow);
-  padding: 28px 24px;
+  border-radius: 12px;
+  padding: 24px;
+  animation: modal-slide-up 250ms ease-out;
 }
-.modal-title { margin: 0 0 16px; font-size: 22px; font-weight: 600; }
+@keyframes overlay-fade {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+@keyframes modal-slide-up {
+  from { transform: translateY(40px); opacity: 0; }
+  to { transform: translateY(0); opacity: 1; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .modal-overlay, .modal, .drawer { animation: none; }
+  .page-skeleton { animation: none; background: var(--skeleton-a); }
+}
+
+/* ---------- Edit Note modal (app parity: dark olive + mint) ---------- */
+.modal.edit-note {
+  display: flex;
+  flex-direction: column;
+  background: var(--modal-bg);
+}
+.edit-note-title {
+  margin: 0 0 14px;
+  color: #fff;
+  font-size: 18px;
+  font-weight: 700;
+  text-align: center;
+}
+.word-preview-row { display: flex; justify-content: center; margin-bottom: 14px; }
+.word-preview {
+  display: inline-block;
+  padding: 4px 12px;
+  border-radius: 6px;
+  color: #fff;
+  font-size: 32px;
+  line-height: 1.4;
+}
+.template-chips {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 10px;
+  margin-bottom: 14px;
+}
+.chip {
+  height: 40px;
+  border-radius: 20px;
+  border: 1px solid var(--mint);
+  background: transparent;
+  color: var(--mint);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.2px;
+  cursor: pointer;
+}
+.chip.active { background: var(--mint); color: var(--mint-on); }
+.note-input {
+  width: 100%;
+  height: 100px;
+  resize: vertical;
+  padding: 10px 12px;
+  border: 1px solid var(--mint);
+  border-radius: 8px;
+  background: var(--modal-input-bg);
+  color: var(--mint);
+  font-family: inherit;
+  font-size: 16px; /* <16px triggers iOS Safari focus auto-zoom */
+}
+.note-input::placeholder { color: #888888; }
+.note-input:focus {
+  outline: none;
+  border-color: var(--mint-strong);
+  box-shadow: 0 0 0 2px rgba(105, 217, 148, 0.35);
+}
+.edit-note-remove {
+  align-self: flex-start;
+  min-height: 44px;
+  padding: 6px 8px 6px 0;
+  border: none;
+  background: none;
+  color: var(--danger-on-dark);
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.edit-note-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 22px;
+  margin-top: 10px;
+}
+.edit-note-action {
+  min-height: 44px;
+  padding: 0 4px;
+  border: none;
+  background: none;
+  color: var(--mint-strong);
+  font-size: 15px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+/* ---------- Instruction modal (app parity: black card, mint body) ---------- */
+.modal.instruction { background: #000000; }
+.modal-title {
+  margin: 0 0 16px;
+  color: #fff;
+  font-size: 18px;
+  font-weight: 700;
+  text-align: center;
+}
 .modal-steps {
   list-style: none;
-  margin: 0 0 24px;
+  margin: 0 0 18px;
   padding: 0;
   display: flex;
   flex-direction: column;
@@ -241,7 +538,7 @@ html, body {
 .modal-steps li {
   position: relative;
   padding-left: 22px;
-  color: var(--ink-soft);
+  color: var(--mint);
   font-size: 15px;
   line-height: 1.4;
 }
@@ -253,43 +550,65 @@ html, body {
   width: 6px;
   height: 6px;
   border-radius: 50%;
-  background: var(--accent);
+  background: var(--mint-strong);
+}
+.legend {
+  list-style: none;
+  margin: 0 0 22px;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 16px;
+}
+.legend-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--mint);
+}
+.legend-swatch {
+  width: 14px;
+  height: 14px;
+  border-radius: 4px;
+  flex: none;
+  border: 1px solid rgba(255, 255, 255, 0.15);
 }
 .modal-primary {
   width: 100%;
   min-height: 48px;
   border: none;
-  background: var(--accent);
-  color: #fff;
-  border-radius: 9px;
+  background: var(--mint);
+  color: #1F2621;
+  border-radius: 10px;
   font-size: 16px;
+  font-weight: 700;
   cursor: pointer;
 }
-.modal-primary:hover { background: #6a4c33; }
 
 /* ---------- Snackbar ---------- */
 .snackbar {
   position: fixed;
-  bottom: 24px;
+  bottom: calc(72px + env(safe-area-inset-bottom));
   left: 50%;
   transform: translateX(-50%);
-  z-index: 90;
+  z-index: 110; /* above the modal overlay (100) — Undo must stay reachable */
   display: flex;
   align-items: center;
   gap: 16px;
   padding: 12px 12px 12px 18px;
-  background: var(--ink);
-  color: #f6f2ea;
+  background: var(--modal-bg);
+  color: var(--mint);
   border-radius: 10px;
-  box-shadow: var(--shadow);
+  box-shadow: var(--card-shadow);
   font-size: 14px;
 }
 .snackbar-undo {
-  min-height: 36px;
+  min-height: 44px;
   padding: 0 14px;
   border: none;
   background: transparent;
-  color: #e3c39c;
+  color: var(--mint-strong);
   font-size: 14px;
   font-weight: 600;
   cursor: pointer;
@@ -300,15 +619,15 @@ html, body {
 /* ---------- Toast (non-blocking write errors) ---------- */
 .toast {
   position: fixed;
-  top: 24px;
+  top: calc(64px + env(safe-area-inset-top));
   left: 50%;
   transform: translateX(-50%);
-  z-index: 95;
+  z-index: 120; /* above everything — write errors must never be hidden */
   padding: 12px 18px;
-  background: #8a2b2b;
-  color: #fdf3ef;
+  background: var(--danger-bg);
+  color: #fff;
   border-radius: 10px;
-  box-shadow: var(--shadow);
+  box-shadow: var(--card-shadow);
   font-size: 14px;
 }
 
@@ -320,7 +639,7 @@ html, body {
   min-height: 240px;
   padding: 24px;
   text-align: center;
-  color: var(--ink);
+  color: var(--text);
   opacity: 0.7;
   font-size: 15px;
 }
@@ -337,5 +656,5 @@ html, body {
   max-width: 420px;
   text-align: center;
 }
-.error-owner { font-size: 15px; color: var(--ink-soft); margin: 0 0 8px; }
-.error-message { font-size: 20px; line-height: 1.5; color: var(--ink); margin: 0; }
+.error-owner { font-size: 15px; color: var(--text-soft); margin: 0 0 8px; }
+.error-message { font-size: 20px; line-height: 1.5; color: var(--text); margin: 0; }
