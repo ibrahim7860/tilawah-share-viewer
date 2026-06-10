@@ -6,6 +6,7 @@ import { loadPage, fontFamilyFor } from './quran/loadPage.js'
 import { clampPage, TOTAL_PAGES } from './quran/nav.js'
 import { HIGHLIGHT_COLORS, isTemplate, wordInMark } from './quran/highlight.js'
 import { upsertMark, removeMark, keyOf, applyWithRollback } from './state/marks.js'
+import { canApplySnapshot } from './state/liveSync.js'
 import Page from './components/Page.jsx'
 import Header from './components/Header.jsx'
 import BrowseDrawer from './components/BrowseDrawer.jsx'
@@ -23,6 +24,11 @@ export default function App() {
   const [pageNumber, setPageNumber] = useState(1)
   const [page, setPage] = useState(null)
   const [marks, setMarks] = useState([])
+  // Live-sync race guards: writeSeq bumps on every optimistic write (monotonic);
+  // pendingWrites counts in-flight writes. A ping's mistake snapshot is applied
+  // only when it can't have raced a local write (see canApplySnapshot).
+  const writeSeq = useRef(0)
+  const pendingWrites = useRef(0)
   // selected: { word, existing, preview? } — preview is the template the user
   // tapped in the modal; clearing `selected` (any dismiss path) reverts the
   // live tint structurally, so `marks` stays pure server-state.
@@ -163,7 +169,25 @@ export default function App() {
   // count this sitting as a session for the link owner. Debounced so rapid
   // flipping reports only the landed page, never every intermediate one. Pure
   // observation of pageNumber — does not affect how flips work.
-  useActivityReporter(token, pageNumber, status === 'ready')
+  // Near-live mistake-sync: the page ping returns the owner's current mistakes.
+  // Apply them as authoritative server state only when no local write raced the
+  // snapshot (no write in flight, none since the ping was sent) — else skip and
+  // let the next flip reconcile, so an in-flight optimistic mark is never lost.
+  const applyMistakeSnapshot = (mistakes, seqAtSend) => {
+    if (canApplySnapshot({ pending: pendingWrites.current, seqAtSend, seqNow: writeSeq.current })) {
+      setMarks(mistakes)
+    }
+  }
+  useActivityReporter(token, pageNumber, status === 'ready', writeSeq, applyMistakeSnapshot)
+
+  // Bracket an optimistic write so live-sync knows a write is in flight (and
+  // that one happened since any ping was sent). run() is applyWithRollback,
+  // which never rejects, so pendingWrites is always balanced.
+  const trackWrite = async (run) => {
+    writeSeq.current++
+    pendingWrites.current++
+    try { await run() } finally { pendingWrites.current-- }
+  }
 
   useEffect(() => {
     if (status !== 'ready') return
@@ -223,7 +247,7 @@ export default function App() {
     // PUT; create a brand-new mark via POST.
     const prev = selected.existing
     setSelected(null)
-    await applyWithRollback({
+    await trackWrite(() => applyWithRollback({
       apply: (cur) => upsertMark(cur, mark),
       // A failed UPDATE must restore the previous mark (old note), not
       // delete it; only a failed CREATE removes the optimistic mark.
@@ -231,24 +255,24 @@ export default function App() {
       setState: setMarks,
       apiCall: () => (prev ? updateMistake(token, mark) : addMistake(token, mark)),
       onError: onWriteError,
-    })
+    }))
   }
 
   const deleteSelected = async () => {
     const mark = selected.existing
     setSelected(null); setUndo(mark)
-    await applyWithRollback({
+    await trackWrite(() => applyWithRollback({
       apply: (cur) => removeMark(cur, keyOf(mark)),
       revert: (cur) => upsertMark(cur, mark),
       setState: setMarks,
       apiCall: () => deleteMistake(token, mark),
       onError: onWriteError,
-    })
+    }))
   }
 
   const undoDelete = async () => {
     const mark = undo; setUndo(null)
-    await applyWithRollback({
+    await trackWrite(() => applyWithRollback({
       apply: (cur) => upsertMark(cur, mark),
       revert: (cur) => removeMark(cur, keyOf(mark)),
       setState: setMarks,
@@ -256,7 +280,7 @@ export default function App() {
       // backend upserts, so a racing duplicate is still safe).
       apiCall: () => addMistake(token, mark),
       onError: onWriteError,
-    })
+    }))
   }
 
   return (

@@ -34,10 +34,13 @@ export const addMistake = (token, mark) => okJson(req('POST', '/api/share/view/m
 export const updateMistake = (token, mark) => okJson(req('PUT', '/api/share/view/mistakes', token, mark))
 export const deleteMistake = (token, mark) => okJson(req('DELETE', '/api/share/view/mistakes', token, mark))
 
-// Fire-and-forget page-view ping: lets the backend count this sitting as a
-// "session" for the link owner. Must never throw into or block the caller —
-// a slow/failing backend cannot be allowed to affect the viewer UX, so all
-// errors (network and non-2xx) are swallowed. Returns a promise that always
-// resolves; callers don't await it.
+// Page-view ping: counts this sitting as a "session" for the link owner, and
+// its response carries the owner's current mistakes for near-live sync. Resolves
+// to the mistakes array on success, or null on any failure. Must never throw
+// into or block the caller — a slow/failing backend cannot affect the viewer UX,
+// so all errors (network, non-2xx, bad JSON) resolve to null.
 export const reportActivity = (token, page) =>
-  req('POST', '/api/share/view/activity', token, { page }).then(() => {}, () => {})
+  req('POST', '/api/share/view/activity', token, { page })
+    .then((r) => (r && r.ok ? r.json() : null))
+    .then((d) => (d && Array.isArray(d.mistakes) ? d.mistakes : null))
+    .catch(() => null)
