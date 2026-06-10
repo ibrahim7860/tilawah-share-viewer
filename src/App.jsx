@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { readToken } from './token.js'
 import { fetchMeta, fetchMistakes, addMistake, updateMistake, deleteMistake, RevokedError } from './api.js'
+import { useActivityReporter } from './useActivityReporter.js'
 import { loadPage, fontFamilyFor } from './quran/loadPage.js'
 import { clampPage, TOTAL_PAGES } from './quran/nav.js'
 import { HIGHLIGHT_COLORS, isTemplate, wordInMark } from './quran/highlight.js'
@@ -157,6 +158,12 @@ export default function App() {
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [status])
+
+  // Fire-and-forget: report the page the viewer settles on so the backend can
+  // count this sitting as a session for the link owner. Debounced so rapid
+  // flipping reports only the landed page, never every intermediate one. Pure
+  // observation of pageNumber — does not affect how flips work.
+  useActivityReporter(token, pageNumber, status === 'ready')
 
   useEffect(() => {
     if (status !== 'ready') return
