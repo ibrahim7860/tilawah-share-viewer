@@ -21,6 +21,7 @@ const pageMock = vi.hoisted(() => ({ page: null }))
 vi.mock('../src/quran/loadPage.js', () => ({
   loadPage: vi.fn(() => Promise.resolve(pageMock.page)),
   fontFamilyFor: () => 'p1',
+  prefetchAround: vi.fn(),
 }))
 
 // Default: a single word. PAGE3: a three-word ayah for range tests.

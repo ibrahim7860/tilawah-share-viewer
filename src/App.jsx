@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { readToken } from './token.js'
 import { fetchMeta, fetchMistakes, addMistake, updateMistake, deleteMistake, RevokedError } from './api.js'
 import { useActivityReporter } from './useActivityReporter.js'
-import { loadPage, fontFamilyFor } from './quran/loadPage.js'
+import { loadPage, fontFamilyFor, prefetchAround } from './quran/loadPage.js'
 import { clampPage, TOTAL_PAGES } from './quran/nav.js'
 import { HIGHLIGHT_COLORS, isTemplate, wordInMark } from './quran/highlight.js'
 import { upsertMark, removeMark, keyOf, applyWithRollback } from './state/marks.js'
@@ -199,7 +199,13 @@ export default function App() {
     if (status !== 'ready') return
     let active = true
     loadPage(pageNumber)
-      .then((d) => { if (active) { setPage(d); setLoadedPage(pageNumber); setPageError(false) } })
+      .then((d) => {
+        if (!active) return
+        setPage(d); setLoadedPage(pageNumber); setPageError(false)
+        // Warm the neighbors so the next flip is instant (deployed parity with
+        // local disk). Idle-scheduled and network-guarded inside prefetchAround.
+        prefetchAround(pageNumber)
+      })
       .catch(() => { if (active) { setPage(null); setPageError(true) } })
     return () => { active = false }
   }, [pageNumber, status])
