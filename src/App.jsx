@@ -23,6 +23,12 @@ export default function App() {
   const [meta, setMeta] = useState(null)
   const [pageNumber, setPageNumber] = useState(1)
   const [page, setPage] = useState(null)
+  // The page number the currently-rendered `page` data belongs to. It only
+  // advances once loadPage() resolves (font + JSON ready), so the per-page QCF
+  // font-family always matches the glyphs on screen. `pageNumber` is the flip
+  // *target* and updates instantly; pairing the old page's glyphs with the new
+  // page's (often not-yet-loaded) font is what flashed fallback letters mid-flip.
+  const [loadedPage, setLoadedPage] = useState(1)
   const [marks, setMarks] = useState([])
   // Live-sync race guards: writeSeq bumps on every optimistic write (monotonic);
   // pendingWrites counts in-flight writes. A ping's mistake snapshot is applied
@@ -193,7 +199,7 @@ export default function App() {
     if (status !== 'ready') return
     let active = true
     loadPage(pageNumber)
-      .then((d) => { if (active) { setPage(d); setPageError(false) } })
+      .then((d) => { if (active) { setPage(d); setLoadedPage(pageNumber); setPageError(false) } })
       .catch(() => { if (active) { setPage(null); setPageError(true) } })
     return () => { active = false }
   }, [pageNumber, status])
@@ -288,7 +294,7 @@ export default function App() {
       <Header meta={meta} onBrowse={() => setBrowseOpen(true)} onHelp={() => setHelpOpen(true)} />
       <div className="page-zone" ref={pageZoneRef}
            onTouchStart={onTouchStart} onTouchEnd={onTouchEnd} onPointerDown={onPointerDown}>
-        {page ? <Page page={page} pageNumber={pageNumber} marks={marks} preview={previewMark} onSelectWord={selectWord} />
+        {page ? <Page page={page} pageNumber={loadedPage} marks={marks} preview={previewMark} onSelectWord={selectWord} />
           : pageError ? <div className="page-error" role="alert">Couldn't load this page. Try again.</div>
           : <div className="page-skeleton" />}
       </div>
@@ -305,7 +311,7 @@ export default function App() {
         <BrowseDrawer currentPage={pageNumber} onNavigate={goToPage} onClose={() => setBrowseOpen(false)} />
       )}
       <InstructionModal forceOpen={helpOpen} onClose={() => setHelpOpen(false)} />
-      {selected && <EditNoteModal key={selected.word.id} word={selected.word} family={fontFamilyFor(pageNumber)}
+      {selected && <EditNoteModal key={selected.word.id} word={selected.word} family={fontFamilyFor(loadedPage)}
         existing={selected.existing}
         onSave={(t) => markWord(t)} onDelete={deleteSelected}
         onPreview={(t) => setSelected((s) => (s ? { ...s, preview: t } : s))}
