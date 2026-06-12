@@ -490,6 +490,9 @@ button:active { opacity: 0.7; }
   text-align: center;
 }
 .word-preview-row { display: flex; justify-content: center; margin-bottom: 14px; }
+/* Attribution caption + name-prompt helper — muted, centered (eng review 2B/2C). */
+.marked-by { margin: -6px 0 12px; color: #9a9a9a; font-size: 13px; text-align: center; }
+.name-help { margin: 0 0 12px; color: #9a9a9a; font-size: 14px; text-align: center; line-height: 1.4; }
 .word-preview {
   display: inline-block;
   padding: 4px 12px;
