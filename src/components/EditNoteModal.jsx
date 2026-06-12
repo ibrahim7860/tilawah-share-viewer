@@ -40,6 +40,10 @@ export default function EditNoteModal({ word, family, existing, onSave, onDelete
               aria-label="Selected word preview">{word.text}</span>
       </div>
 
+      {existing?.editorName && (
+        <p className="marked-by">Marked by {existing.editorName}</p>
+      )}
+
       <div className="template-chips">
         {TEMPLATES.map((t) => (
           <button key={t} className={activeTemplate === t ? 'chip active' : 'chip'}

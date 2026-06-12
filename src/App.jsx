@@ -14,6 +14,8 @@ import InstructionModal from './components/InstructionModal.jsx'
 import UndoSnackbar from './components/UndoSnackbar.jsx'
 import ErrorScreen from './components/ErrorScreen.jsx'
 import EditNoteModal from './components/EditNoteModal.jsx'
+import NamePromptModal from './components/NamePromptModal.jsx'
+import { getEditorName, setEditorName } from './identity.js'
 
 export default function App() {
   const token = readToken()
@@ -44,6 +46,19 @@ export default function App() {
   const [browseOpen, setBrowseOpen] = useState(false)
   const [pageError, setPageError] = useState(false)
   const [toast, setToast] = useState(null)
+  // Lazy one-time name capture: { resolve } while the prompt is open, else null.
+  const [namePrompt, setNamePrompt] = useState(null)
+
+  // Resolve to the stored editor name, or open the one-time prompt and resolve
+  // when the user saves a name. Resolves to null if they cancel (Escape/backdrop)
+  // so the calling write path can bail without marking — required-to-edit, but
+  // never a trap (eng review 2C).
+  const requireName = () =>
+    new Promise((resolve) => {
+      const existing = getEditorName()
+      if (existing) { resolve(existing); return }
+      setNamePrompt({ resolve })
+    })
 
   const goToPage = (n) => setPageNumber(clampPage(n))
 
@@ -248,17 +263,20 @@ export default function App() {
   })()
 
   const markWord = async (rawNote = null) => {
+    // Snapshot selection + coords before any await, then CLOSE the edit modal so
+    // the name prompt (if needed) doesn't stack on top of it.
+    const sel = selected
+    const coords = coordsForSelection(sel, page)
+    if (!coords) { setSelected(null); return }
+    const prev = sel.existing // existing mark → PUT; none → POST (both upsert server-side)
+    setSelected(null)
+
+    const editorName = await requireName()
+    if (!editorName) return // cancelled name prompt — no write
+
     // Normalize blank notes to null so an empty save is a plain (red) mark.
     const note = rawNote && String(rawNote).trim() ? rawNote : null
-
-    const coords = coordsForSelection(selected, page)
-    if (!coords) { setSelected(null); return }
-    const mark = { ...coords, note }
-    // Verb by existence (both are upserts server-side; this keeps intent
-    // honest): update an existing mark — including clearing its note — via
-    // PUT; create a brand-new mark via POST.
-    const prev = selected.existing
-    setSelected(null)
+    const mark = { ...coords, note, editorName }
     await trackWrite(() => applyWithRollback({
       apply: (cur) => upsertMark(cur, mark),
       // A failed UPDATE must restore the previous mark (old note), not
@@ -271,8 +289,12 @@ export default function App() {
   }
 
   const deleteSelected = async () => {
-    const mark = selected.existing
-    setSelected(null); setUndo(mark)
+    const existing = selected.existing
+    setSelected(null) // close the edit modal before any name prompt
+    const editorName = await requireName()
+    if (!editorName) return // cancelled — keep the mark
+    const mark = { ...existing, editorName }
+    setUndo(mark)
     await trackWrite(() => applyWithRollback({
       apply: (cur) => removeMark(cur, keyOf(mark)),
       revert: (cur) => upsertMark(cur, mark),
@@ -283,7 +305,9 @@ export default function App() {
   }
 
   const undoDelete = async () => {
-    const mark = undo; setUndo(null)
+    const editorName = await requireName()
+    if (!editorName) return // cancelled — leave the undo snackbar so they can retry
+    const mark = { ...undo, editorName }; setUndo(null)
     await trackWrite(() => applyWithRollback({
       apply: (cur) => upsertMark(cur, mark),
       revert: (cur) => removeMark(cur, keyOf(mark)),
@@ -322,6 +346,12 @@ export default function App() {
         onSave={(t) => markWord(t)} onDelete={deleteSelected}
         onPreview={(t) => setSelected((s) => (s ? { ...s, preview: t } : s))}
         onClose={() => setSelected(null)} />}
+      {namePrompt && (
+        <NamePromptModal
+          onSave={(n) => { const saved = setEditorName(n); namePrompt.resolve(saved); setNamePrompt(null) }}
+          onClose={() => { namePrompt.resolve(null); setNamePrompt(null) }}
+        />
+      )}
       {undo && <UndoSnackbar onUndo={undoDelete} onExpire={() => setUndo(null)} />}
       {toast && <div className="toast" role="status">{toast}</div>}
     </div>

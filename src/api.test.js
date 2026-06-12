@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { reportActivity } from './api.js'
+import { reportActivity, addMistake, updateMistake, deleteMistake } from './api.js'
 
 describe('reportActivity', () => {
   beforeEach(() => {
@@ -52,5 +52,32 @@ describe('reportActivity', () => {
     vi.stubGlobal('fetch', fetchMock)
 
     await expect(reportActivity('tok', 7)).resolves.toBeNull()
+  })
+})
+
+// Eng review 3A: every share-viewer write must carry the recipient's editorName
+// (the backend 400s without it). The whole `mark` object is serialized as the
+// body, so threading editorName through the caller is what satisfies the contract.
+describe('mistake write helpers carry editorName', () => {
+  beforeEach(() => vi.restoreAllMocks())
+  afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals() })
+
+  const okFetch = () =>
+    vi.fn().mockResolvedValue({ ok: true, status: 200, json: async () => ({}) })
+
+  it.each([
+    ['addMistake', addMistake, 'POST'],
+    ['updateMistake', updateMistake, 'PUT'],
+    ['deleteMistake', deleteMistake, 'DELETE'],
+  ])('%s sends editorName + token in the body/header', async (_name, fn, method) => {
+    const fetchMock = okFetch()
+    vi.stubGlobal('fetch', fetchMock)
+
+    await fn('tok-9', { surah: 2, ayah: 5, startWordIndex: 3, endWordIndex: 3, note: 'm', editorName: 'Ahmad' })
+
+    const [, opts] = fetchMock.mock.calls[0]
+    expect(opts.method).toBe(method)
+    expect(opts.headers['X-Share-Token']).toBe('tok-9')
+    expect(JSON.parse(opts.body).editorName).toBe('Ahmad')
   })
 })

@@ -44,6 +44,10 @@ import App from '../src/App.jsx'
 beforeEach(() => {
   localStorage.clear()
   localStorage.setItem('share_instructions_seen', '1') // keep the help modal closed
+  // Seed a stored editor name so the lazy name prompt is transparent to these
+  // marking tests (they verify write behavior, not the name gate, which has its
+  // own tests in the "name gate" describe block below).
+  localStorage.setItem('share_editor_name', 'Tester')
   window.history.replaceState(null, '', '/#sometoken')
   pageMock.page = PAGE
   addMistake.mockClear(); updateMistake.mockClear(); deleteMistake.mockClear()
@@ -421,5 +425,51 @@ describe('App page flipping (keyboard + swipe, RTL book order)', () => {
     fireEvent.wheel(zone, { deltaX: -40, deltaY: -300 })
     fireEvent.wheel(zone, { deltaX: -40, deltaY: -300 })
     expect(screen.getByRole('button', { name: /Page 1/ })).toBeTruthy()
+  })
+})
+
+// Eng review 2C/3A: the lazy, never-anonymous name gate.
+describe('App name gate (lazy editor name)', () => {
+  it('reading without editing never prompts for a name', async () => {
+    localStorage.removeItem('share_editor_name')
+    render(<App />)
+    await screen.findByRole('button', { name: "Qur'an word" })
+    // No name prompt appears for a pure reader.
+    expect(screen.queryByLabelText('Your name')).toBeNull()
+  })
+
+  it('first edit prompts for a name, then writes with editorName', async () => {
+    localStorage.removeItem('share_editor_name')
+    render(<App />)
+    fireEvent.click(await screen.findByRole('button', { name: "Qur'an word" }))
+    await screen.findByRole('dialog', { name: 'Edit Note' })
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+
+    // No write yet — the name prompt gates it.
+    const nameInput = await screen.findByLabelText('Your name')
+    expect(addMistake).not.toHaveBeenCalled()
+
+    fireEvent.change(nameInput, { target: { value: 'Ahmad' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+
+    await waitFor(() => expect(addMistake).toHaveBeenCalledTimes(1))
+    expect(addMistake.mock.calls[0][1]).toMatchObject({ editorName: 'Ahmad' })
+    // The name persists for next time.
+    expect(localStorage.getItem('share_editor_name')).toBe('Ahmad')
+  })
+
+  it('cancelling the name prompt (Escape) writes nothing', async () => {
+    localStorage.removeItem('share_editor_name')
+    render(<App />)
+    fireEvent.click(await screen.findByRole('button', { name: "Qur'an word" }))
+    await screen.findByRole('dialog', { name: 'Edit Note' })
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+
+    await screen.findByLabelText('Your name')
+    fireEvent.keyDown(window, { key: 'Escape' })
+
+    await waitFor(() => expect(screen.queryByLabelText('Your name')).toBeNull())
+    expect(addMistake).not.toHaveBeenCalled()
+    expect(localStorage.getItem('share_editor_name')).toBeNull()
   })
 })
