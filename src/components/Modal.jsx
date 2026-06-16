@@ -14,12 +14,21 @@ const FOCUSABLE = 'button, [href], input, select, textarea, [tabindex]:not([tabi
 export default function Modal({ onClose, labelledBy, label, cardClassName = 'modal', children }) {
   const cardRef = useRef(null)
 
+  // Read onClose through a ref so the focus/keydown effect can run ONCE (mount →
+  // unmount) instead of re-running whenever the parent passes a fresh onClose
+  // closure. Without this, every parent re-render (e.g. the live-preview
+  // setSelected on each keystroke in EditNoteModal) tore down and re-ran this
+  // effect, and its focus-restore/refocus yanked focus out of the <textarea> —
+  // which dismisses the soft keyboard on mobile after every character.
+  const onCloseRef = useRef(onClose)
+  useEffect(() => { onCloseRef.current = onClose })
+
   useEffect(() => {
     const previouslyFocused = document.activeElement
     cardRef.current?.focus()
 
     const onKey = (e) => {
-      if (e.key === 'Escape') { onClose?.(); return }
+      if (e.key === 'Escape') { onCloseRef.current?.(); return }
       if (e.key !== 'Tab' || !cardRef.current) return
       // Keep Tab cycling within the dialog.
       const focusables = [...cardRef.current.querySelectorAll(FOCUSABLE)]
@@ -36,7 +45,7 @@ export default function Modal({ onClose, labelledBy, label, cardClassName = 'mod
       window.removeEventListener('keydown', onKey)
       if (previouslyFocused instanceof HTMLElement) previouslyFocused.focus()
     }
-  }, [onClose])
+  }, [])
 
   return (
     <div className="modal-overlay" role="presentation" onClick={onClose}>

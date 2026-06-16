@@ -227,6 +227,33 @@ describe('App live preview', () => {
   })
 })
 
+// Regression: live-preview re-renders (setSelected on each keystroke) used to
+// re-run Modal's focus effect, yanking focus out of the textarea — which
+// dismisses the soft keyboard on mobile after every character typed.
+describe('App edit-note keeps keyboard focus while typing', () => {
+  it('typing in the note textarea does not move focus off it', async () => {
+    await renderAndOpenModal()
+    const textarea = await screen.findByLabelText('Note')
+    textarea.focus()
+    expect(document.activeElement).toBe(textarea)
+    fireEvent.change(textarea, { target: { value: 'm' } })
+    await waitFor(() => expect(textarea.value).toBe('m'))
+    expect(document.activeElement).toBe(textarea)
+    // A second character must also keep focus (the bug recurred per-keystroke).
+    fireEvent.change(textarea, { target: { value: 'ma' } })
+    expect(document.activeElement).toBe(textarea)
+  })
+
+  it('picking a template chip (also a setSelected preview) keeps the textarea usable', async () => {
+    await renderAndOpenModal()
+    fireEvent.click(screen.getByRole('button', { name: 'Tajweed' }))
+    const textarea = await screen.findByLabelText('Note')
+    textarea.focus()
+    fireEvent.change(textarea, { target: { value: 'Tajweed plus note' } })
+    expect(document.activeElement).toBe(textarea)
+  })
+})
+
 describe('App write failures', () => {
   it('a failed CREATE rolls back the optimistic mark and shows the retry toast', async () => {
     addMistake.mockRejectedValueOnce(new Error('network'))
