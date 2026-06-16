@@ -12,8 +12,9 @@ vi.mock('../src/api.js', () => ({
   deleteMistake: vi.fn(() => Promise.resolve({})),
 }))
 
-import { addMistake, updateMistake, deleteMistake, fetchMistakes, RevokedError } from '../src/api.js'
+import { addMistake, updateMistake, deleteMistake, fetchMistakes, fetchMeta, RevokedError } from '../src/api.js'
 import { HIGHLIGHT_COLORS } from '../src/quran/highlight.js'
+import ErrorScreen from '../src/components/ErrorScreen.jsx'
 
 // Mock loadPage with a swappable page so individual tests can use a
 // multi-word page (vi.hoisted so the hoisted factory can close over it).
@@ -471,5 +472,31 @@ describe('App name gate (lazy editor name)', () => {
     await waitFor(() => expect(screen.queryByLabelText('Your name')).toBeNull())
     expect(addMistake).not.toHaveBeenCalled()
     expect(localStorage.getItem('share_editor_name')).toBeNull()
+  })
+})
+
+// 2026-06-16: the viewer is Madani-only but FALLS BACK to a Madani render for
+// any other edition instead of hard-erroring (was: status='unsupported').
+describe('App mushaf fallback (Madani-only render)', () => {
+  it('a non-Madani (INDOPAK13) link renders the Madani page, not the unsupported error', async () => {
+    fetchMeta.mockResolvedValueOnce({ ownerDisplayName: 'Owner', startPage: 1, mushafPref: 'INDOPAK13' })
+    const { container } = render(<App />)
+    // It reaches the ready render (a real Qur'an word), and shows no error screen.
+    expect(await screen.findByRole('button', { name: "Qur'an word" })).toBeTruthy()
+    expect(container.querySelector('.error-screen')).toBeNull()
+  })
+
+  it('a missing mushafPref also renders (legacy/null-pref links)', async () => {
+    fetchMeta.mockResolvedValueOnce({ ownerDisplayName: 'Owner', startPage: 1 })
+    const { container } = render(<App />)
+    expect(await screen.findByRole('button', { name: "Qur'an word" })).toBeTruthy()
+    expect(container.querySelector('.error-screen')).toBeNull()
+  })
+
+  // The 'unsupported' path is dormant but intentionally kept as the IndoPak
+  // re-gate; its ErrorScreen message must stay rendered if/when re-enabled.
+  it('ErrorScreen still renders the unsupported message (dormant re-gate path)', () => {
+    render(<ErrorScreen kind="unsupported" owner="Owner" />)
+    expect(screen.getByText(/edition isn’t supported in the web viewer yet/)).toBeTruthy()
   })
 })

@@ -17,10 +17,23 @@ import EditNoteModal from './components/EditNoteModal.jsx'
 import NamePromptModal from './components/NamePromptModal.jsx'
 import { getEditorName, setEditorName } from './identity.js'
 
+// The web viewer renders the Madani (15-line / MADINA15) mushaf ONLY. Links from
+// owners on any other edition fall back to a Madani render (see the load effect
+// below) instead of hard-erroring. ⚠️ This is safe ONLY while the app ignores
+// `mushaf_pref` at render time (so every stored page/mark is Madani-coordinate).
+// WHEN IndoPak rendering ships (PR #14 / `indopak-justify`), THIS MUST CHANGE —
+// add the edition here once the viewer can actually render it, OR the fallback
+// becomes silently wrong (IndoPak pages 1–847 / line marks ≠ Madani 1–604). See
+// plan `2026-06-08-shareable-quran-web-viewer.md` (Update 2026-06-16) + memory
+// `tilawah-indopak-data-audit`.
+const SUPPORTED_MUSHAFS = new Set(['MADINA15'])
+
 export default function App() {
   const token = readToken()
   // loading|ready|revoked|badtoken|unsupported — a missing token is known at
   // mount, so it's the lazy initial state (no setState during the effect).
+  // ('unsupported' is currently dormant — the load effect falls back to a Madani
+  // render instead of setting it — but kept as the re-gate path for IndoPak.)
   const [status, setStatus] = useState(() => (token ? 'loading' : 'badtoken'))
   const [meta, setMeta] = useState(null)
   const [pageNumber, setPageNumber] = useState(1)
@@ -125,7 +138,15 @@ export default function App() {
         // Independent requests — fetch in parallel (each is a full RTT to the
         // backend, and the cold path used to pay them back-to-back).
         const [m, mks] = await Promise.all([fetchMeta(token), fetchMistakes(token)])
-        if (m.mushafPref && m.mushafPref !== 'MADINA15') { setMeta(m); setStatus('unsupported'); return }
+        // Madani fallback: non-MADINA15 editions render with the Madani viewer
+        // rather than erroring. clampPage bounds startPage to [1,604] and marks
+        // are keyed by (surah,ayah,word) — mushaf-independent — so this can't
+        // crash or mis-highlight today. (Re-gate via SUPPORTED_MUSHAFS when
+        // IndoPak ships — see the constant's note.) Logged, not surfaced to the
+        // recipient, so the fallback stays observable in QA.
+        if (m.mushafPref && !SUPPORTED_MUSHAFS.has(m.mushafPref)) {
+          console.warn(`[share-viewer] mushaf "${m.mushafPref}" unsupported — falling back to Madani render`)
+        }
         setMeta(m); setPageNumber(clampPage(m.startPage || 1))
         setMarks(mks)
         setStatus('ready')
@@ -227,6 +248,8 @@ export default function App() {
 
   if (status === 'badtoken') return <ErrorScreen kind="invalid" />
   if (status === 'revoked') return <ErrorScreen kind="revoked" />
+  // Dormant since 2026-06-16 (Madani fallback) — kept so re-gating IndoPak is a
+  // one-line change in the load effect. ErrorScreen 'unsupported' string stays too.
   if (status === 'unsupported') return <ErrorScreen kind="unsupported" owner={meta?.ownerDisplayName} />
 
   const verseKeyFor = (pg, word) => {
