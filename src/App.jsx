@@ -352,13 +352,13 @@ export default function App() {
           : <div className="page-skeleton" />}
       </div>
       <nav className="pager">
-        <button className="pager-chevron" aria-label="Previous page" disabled={pageNumber <= 1}
-                onClick={() => setPageNumber((p) => p - 1)}>‹</button>
+        <button className="pager-chevron" aria-label="Next page" disabled={pageNumber >= TOTAL_PAGES}
+                onClick={() => setPageNumber((p) => p + 1)}>‹</button>
         <button className="page-pill" onClick={() => setBrowseOpen(true)}>
           Page {pageNumber}<span className="page-total"> / {TOTAL_PAGES}</span>
         </button>
-        <button className="pager-chevron" aria-label="Next page" disabled={pageNumber >= TOTAL_PAGES}
-                onClick={() => setPageNumber((p) => p + 1)}>›</button>
+        <button className="pager-chevron" aria-label="Previous page" disabled={pageNumber <= 1}
+                onClick={() => setPageNumber((p) => p - 1)}>›</button>
       </nav>
       {browseOpen && (
         <BrowseDrawer currentPage={pageNumber} onNavigate={goToPage} onClose={() => setBrowseOpen(false)} />

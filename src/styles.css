@@ -90,11 +90,19 @@ button:active { opacity: 0.7; }
 /* The mushaf page sizes itself to FIT the viewport: portrait 0.63 aspect,
    capped by height (minus the floating chrome), width, and a taste ceiling.
    Everything — page, top chrome — centers on this one column. */
-/* svh (not dvh): the page must not resize as iOS Safari's toolbar collapses.
-   The 190px chrome budget excludes the notch insets, so subtract them. */
+/* Mobile: height-constrained so the page fits without scrolling.
+   svh (not dvh): the page must not resize as iOS Safari's toolbar collapses.
+   128px = actual chrome (56px top + 72px bottom + 8px page margin + 4px buffer × 2).
+   Safe-area insets (notch/home bar) are excluded and subtracted separately. */
 :root {
-  --page-col: min(640px, calc((100svh - 190px
+  --page-col: min(100vw, calc((100svh - 128px
     - env(safe-area-inset-top) - env(safe-area-inset-bottom)) * 0.63));
+}
+/* Desktop/tablet: switch to width-based sizing so the page fills the screen.
+   The page may extend slightly below the viewport (fixed header/pager stay
+   in place; body scrolls naturally to reveal the bottom of the page). */
+@media (min-width: 600px) {
+  :root { --page-col: min(calc(100vw - 80px), 760px); }
 }
 
 /* Swipe surface around the page; full column width so the page's
@@ -118,7 +126,12 @@ button:active { opacity: 0.7; }
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  padding: calc(64px + env(safe-area-inset-top)) 12px calc(96px + env(safe-area-inset-bottom));
+  padding: calc(56px + env(safe-area-inset-top)) 0 calc(72px + env(safe-area-inset-bottom));
+}
+/* On desktop the page is width-based and taller than the viewport — start
+   from the top so the page top sits right under the header, not off-screen. */
+@media (min-width: 600px) {
+  .app { justify-content: flex-start; padding-left: 12px; padding-right: 12px; }
 }
 
 /* ---------- Floating reading chrome (app parity: no header bar) ---------- */
@@ -188,8 +201,8 @@ button:active { opacity: 0.7; }
   container-type: inline-size;
   width: min(100%, var(--page-col));
   aspect-ratio: 0.63;            /* portrait page proportion */
-  margin: 8px auto;
-  padding: 2.5cqw 3.5cqw;
+  margin: 4px auto;
+  padding: 1cqw 2cqw;
   background: var(--page-bg);
   border-radius: 8px;
   display: flex;
