@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "vite",
     "extract": "node scripts/extract-quran-assets.mjs",
+    "extract:indopak": "node scripts/extract-indopak.mjs",
     "build": "vite build",
     "lint": "eslint .",
     "preview": "vite preview",
