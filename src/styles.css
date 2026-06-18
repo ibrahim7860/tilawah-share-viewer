@@ -210,9 +210,11 @@ button:active { opacity: 0.7; }
   touch-action: pan-y;           /* horizontal swipes flip pages */
 }
 
-/* Short special pages (1–2): center occupied lines vertically. */
+/* Short special pages: center occupied lines vertically. Each kept line takes
+   its 1/N grid slot (Madani 15-line, IndoPak 13-line). */
 .page.page-centered { justify-content: center; }
 .page.page-centered .mushaf-line { flex: 0 0 calc(100% / 15); }
+.page.indopak.page-centered .mushaf-line { flex: 0 0 calc(100% / 13); }
 
 /* one of the 15 equal-height line slots */
 .mushaf-line {

@@ -31,9 +31,12 @@ export default function Page({ page, pageNumber, cfg = DEFAULT_CFG, marks, previ
   const totalLines = cfg.linesPerPage
   const isIndoPak = cfg.layoutKind === 'indopak'
 
-  // Short special pages (Madani 1–2): center the occupied lines vertically (real
-  // mushaf proportions); each line keeps its 1/N grid height via CSS.
-  const centeredPage = !isIndoPak && pageNumber <= 2
+  // Short special pages center their occupied lines vertically (real mushaf
+  // proportions) instead of leaving a bottom gap; each line keeps its 1/N grid
+  // height via CSS. Madani: the fixed large-type pages 1–2. IndoPak: any page
+  // not filling the 13-line grid (only Fatihah, Baqarah's first page, and the
+  // final page — 3 of 847; all others are full).
+  const centeredPage = isIndoPak ? lines.length < totalLines : pageNumber <= 2
 
   // Normal pages: place each render-line on its slot of the N-line grid; gaps
   // stay blank.
