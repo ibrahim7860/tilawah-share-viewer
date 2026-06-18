@@ -245,20 +245,24 @@ button:active { opacity: 0.7; }
 .ayah-line.centered { justify-content: center; }
 
 /* IndoPak: one Unicode nastaleeq font (not the connected per-page QCF glyphs),
-   so words are DISCRETE. Drop the QCF glyph-overlap trick (negative margin), give
-   the cursive vertical room for its diacritics, and a little inter-word breathing
-   space on centered lines so words don't crowd. */
-.page.indopak .ayah-line { align-items: flex-start; }
-/* Full lines pack flush from the edge; the per-line --fit scale (Page.jsx) grows
-   the whole line so its natural width fills the container — justified WITHOUT
-   space-between gaps. Centered (final/short) lines keep their natural size. */
-.page.indopak .ayah-line:not(.centered) { justify-content: flex-start; }
-.page.indopak .ayah-line.centered { gap: 0.6cqw; }
+   so words are DISCRETE — drop the QCF glyph-overlap trick (negative margin).
+   Every line renders at ONE uniform size (no per-line up-scaling), so text looks
+   the same on every page. Lines are CENTERED: a dense line naturally fills the
+   width; a sparse one sits centered (short), like any short line — and short
+   pages center vertically (Page.jsx). Uniform size keeps tall nastaleeq marks
+   from overlapping the next row. */
+.page.indopak .ayah-line {
+  align-items: flex-start;
+  justify-content: center;
+  /* No flex `gap`: it isn't included in the fit measurement (which sums word
+     widths), so it would push dense lines past the box. Inter-word spacing lives
+     in the word padding below, which IS measured. */
+}
 .page.indopak .word {
   margin-left: 0;
-  padding: 0.4cqw 0.45cqw;   /* horizontal padding = the inter-word spacing (measured into the fit) */
-  font-size: calc(11cqw * var(--fit, 1));   /* sized so a typical full line fills at --fit≈1 */
-  line-height: 1.2;
+  padding: 0.4cqw 0.5cqw;   /* horizontal padding = inter-word spacing (counted in the fit) */
+  font-size: calc(7.5cqw * var(--fit, 1));   /* uniform IndoPak size; only an overflowing line shrinks */
+  line-height: 1.4;   /* vertical room for nastaleeq's stacked marks (avoids row overlap) */
 }
 
 .word {
