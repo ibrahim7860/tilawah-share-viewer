@@ -268,7 +268,15 @@ button:active { opacity: 0.7; }
    and CENTER each line (a sparse line is naturally short). Dense pages are
    untouched (they keep the per-line width-fill). */
 .page.indopak.page-centered .ayah-line { justify-content: center; }
-.page.indopak.page-centered .word { font-size: calc(7.5cqw * var(--fit, 1)); }
+/* Short pages render at a fixed size, so a full line (e.g. p2 line 1:
+   الٓمّٓ ذٰلِكَ الْكِتٰبُ لَا رَيْبَ ۛۖۚ فِيْهِ) packs to the edge with no room — its
+   nastaleeq waqf marks then touch the next word. Give short-page words extra
+   inter-word padding; a line that no longer fits just shrinks (shrink-only). */
+.page.indopak.page-centered .word {
+  font-size: calc(7.5cqw * var(--fit, 1));
+  padding-left: 1.2cqw;
+  padding-right: 1.2cqw;
+}
 
 .word {
   position: relative;
