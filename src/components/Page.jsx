@@ -1,44 +1,58 @@
 import { useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { wordBackground, wordInMark } from '../quran/highlight.js'
-import { fontFamilyFor } from '../quran/loadPage.js'
-import { buildPageLayout, TOTAL_LINES, surahName } from '../quran/mushafLayout.js'
+import { buildLayout, surahName } from '../quran/mushafLayout.js'
+import { getMushafConfig, DEFAULT_MUSHAF } from '../quran/mushaf.js'
+
+const DEFAULT_CFG = getMushafConfig(DEFAULT_MUSHAF)
 
 /**
- * Renders one page as a proper Madani-mushaf page: a fixed 15-line grid where
- * ayah lines are justified edge-to-edge (centered when they're a surah's final
- * line or on the special large-type pages), with surah-name banners and basmala
- * lines placed on their reserved line slots.
+ * Renders one mushaf page on a fixed N-line grid (15 for Madani, 13 for IndoPak)
+ * where ayah lines are justified edge-to-edge (centered when they're a surah's
+ * final line, an `isCentered` IndoPak line, or the special large-type pages),
+ * with surah-name banners and basmala lines on their reserved slots.
  *
- * Pages 1–2 (short special pages, e.g. Al-Fatihah) render only their occupied
- * lines, vertically centered, instead of leaving the lower grid blank.
+ * The two editions differ only in their config (`cfg`, see quran/mushaf.js):
+ *   - layout: `buildLayout` dispatches to the Madani heuristic builder or the
+ *     IndoPak explicit-line builder.
+ *   - font: Madani uses a per-page QCF family (`p{N}`); IndoPak uses one Unicode
+ *     nastaleeq family for every page (the `.indopak` class drops the QCF
+ *     glyph-overlap trick, which only applies to the connected QCF glyphs).
+ *
+ * Madani pages 1–2 (short, e.g. Al-Fatihah) render only their occupied lines,
+ * vertically centered, instead of leaving the lower grid blank.
  *
  * `preview` ({surah, ayah, startWordIndex, endWordIndex, color} | null) tints
  * matching words live while the Edit Note modal is open — it never touches
  * `marks`, so dismissing the modal reverts it structurally.
  */
-export default function Page({ page, pageNumber, marks, preview, onSelectWord }) {
-  const lines = useMemo(() => buildPageLayout(page, pageNumber), [page, pageNumber])
-  const family = fontFamilyFor(pageNumber)
+export default function Page({ page, pageNumber, cfg = DEFAULT_CFG, marks, preview, onSelectWord }) {
+  const lines = useMemo(() => buildLayout(page, pageNumber, cfg), [page, pageNumber, cfg])
+  const family = cfg.fontFamilyFor(pageNumber)
+  const totalLines = cfg.linesPerPage
+  const isIndoPak = cfg.layoutKind === 'indopak'
 
-  // Short special pages: center the occupied lines vertically (real mushaf
-  // proportions); each line keeps its 1/15 grid height via CSS.
-  const centeredPage = pageNumber <= 2
+  // Short special pages (Madani 1–2): center the occupied lines vertically (real
+  // mushaf proportions); each line keeps its 1/N grid height via CSS.
+  const centeredPage = !isIndoPak && pageNumber <= 2
 
-  // Normal pages: place each render-line on its slot of the 15-line grid;
-  // gaps stay blank.
+  // Normal pages: place each render-line on its slot of the N-line grid; gaps
+  // stay blank.
   let slots
   if (centeredPage) {
     slots = lines
   } else {
-    slots = Array.from({ length: TOTAL_LINES }, () => null)
+    slots = Array.from({ length: totalLines }, () => null)
     for (const l of lines) {
       const idx = l.lineNumber - 1
-      if (idx >= 0 && idx < TOTAL_LINES) slots[idx] = l
+      if (idx >= 0 && idx < totalLines) slots[idx] = l
     }
   }
 
+  const pageClass = [centeredPage ? 'page page-centered' : 'page', isIndoPak ? 'indopak' : '']
+    .filter(Boolean).join(' ')
+
   return (
-    <div className={centeredPage ? 'page page-centered' : 'page'} dir="rtl">
+    <div className={pageClass} dir="rtl">
       {slots.map((l, i) => (
         <div className="mushaf-line" key={i}>
           {l && <Line line={l} page={page} family={family} marks={marks} preview={preview} onSelectWord={onSelectWord} />}
@@ -69,7 +83,7 @@ function AyahLine({ line, page, family, marks, preview, onSelectWord }) {
   // currently applied (no feedback loop):
   //  - `fits`: a surah's FULL final line falls back to justified
   //    (printed-mushaf behavior: centering only manifests on short lines).
-  //  - `fit`:  a line whose natural QCF width exceeds the container gets its
+  //  - `fit`:  a line whose natural width exceeds the container gets its
   //    font scaled down to fit — a handful of dense lines per mushaf —
   //    instead of clipping glyphs at the page edge.
   const [fits, setFits] = useState(true)

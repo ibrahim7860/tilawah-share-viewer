@@ -1,6 +1,14 @@
 // Quran navigation data + helpers, ported verbatim from the app's
 // src/constants/quranData.js so the viewer's surah/juz/page mapping is
-// byte-for-byte identical to the in-app Quran tab (15-line Madani Mushaf).
+// byte-for-byte identical to the in-app Quran tab.
+//
+// SURAH_LIST.firstPage + JUZ_TO_PAGE_MAP are the 15-line Madani mushaf (604
+// pages). The IndoPak 13-line mushaf (847 pages) has its own numbering in
+// INDOPAK_SURAH_FIRST_PAGES / INDOPAK_JUZ_TO_PAGE_MAP. The exported helpers take
+// a `mushafId` (default MADINA15) and select the right table — pass the active
+// share's mushaf id (quran/mushaf.js getMushafConfig().id).
+
+import { getMushafConfig, DEFAULT_MUSHAF } from './mushaf.js'
 
 export const TOTAL_PAGES = 604
 
@@ -160,41 +168,71 @@ export const JUZ_TO_PAGE_MAP = {
   21: 402, 22: 422, 23: 442, 24: 462, 25: 482, 26: 502, 27: 522, 28: 542, 29: 562, 30: 582,
 }
 
-/** Clamp any value to a valid page number in [1, 604]. */
-export function clampPage(n) {
-  const x = Math.floor(Number(n))
-  if (!Number.isFinite(x)) return 1
-  return Math.min(TOTAL_PAGES, Math.max(1, x))
+// IndoPak 13-line mushaf page numbering (847 pages). Ported verbatim from the
+// app's quranData.js INDOPAK_SURAH_FIRST_PAGES / INDOPAK_JUZ_TO_PAGE_MAP so the
+// viewer's jump-to-surah/juz lands on the exact page the app shows.
+export const INDOPAK_SURAH_FIRST_PAGES = {
+  1: 1, 2: 2, 3: 67, 4: 105, 5: 146, 6: 176, 7: 208, 8: 245, 9: 259, 10: 287,
+  11: 307, 12: 327, 13: 345, 14: 354, 15: 363, 16: 371, 17: 392, 18: 407, 19: 424, 20: 434,
+  21: 448, 22: 461, 23: 476, 24: 486, 25: 500, 26: 510, 27: 524, 28: 536, 29: 551, 30: 561,
+  31: 570, 32: 576, 33: 580, 34: 594, 35: 602, 36: 610, 37: 617, 38: 627, 39: 634, 40: 646,
+  41: 658, 42: 667, 43: 676, 44: 685, 45: 690, 46: 696, 47: 703, 48: 709, 49: 715, 50: 720,
+  51: 724, 52: 728, 53: 731, 54: 735, 55: 739, 56: 744, 57: 749, 58: 756, 59: 760, 60: 765,
+  61: 769, 62: 772, 63: 774, 64: 776, 65: 779, 66: 782, 67: 786, 68: 789, 69: 793, 70: 796,
+  71: 799, 72: 802, 73: 805, 74: 807, 75: 810, 76: 812, 77: 815, 78: 818, 79: 819, 80: 821,
+  81: 823, 82: 824, 83: 825, 84: 827, 85: 828, 86: 829, 87: 830, 88: 831, 89: 832, 90: 834,
+  91: 835, 92: 836, 93: 837, 94: 837, 95: 838, 96: 838, 97: 839, 98: 839, 99: 840, 100: 841,
+  101: 842, 102: 842, 103: 843, 104: 843, 105: 843, 106: 844, 107: 844, 108: 845, 109: 845, 110: 845,
+  111: 846, 112: 846, 113: 846, 114: 847,
 }
 
-/** First page of a surah (1–114), or null if out of range. */
-export function surahStartPage(number) {
+export const INDOPAK_JUZ_TO_PAGE_MAP = {
+  1: 1, 2: 28, 3: 56, 4: 84, 5: 112, 6: 140, 7: 167, 8: 196, 9: 224, 10: 252,
+  11: 279, 12: 308, 13: 336, 14: 363, 15: 392, 16: 420, 17: 448, 18: 476, 19: 504, 20: 531,
+  21: 558, 22: 586, 23: 612, 24: 640, 25: 666, 26: 696, 27: 726, 28: 756, 29: 786, 30: 818,
+}
+
+const isIndoPak = (mushafId) => mushafId === 'INDOPAK13'
+
+/** First page of a surah (1–114) for the given mushaf, or null if out of range. */
+export function surahStartPage(number, mushafId = DEFAULT_MUSHAF) {
+  if (isIndoPak(mushafId)) return INDOPAK_SURAH_FIRST_PAGES[number] ?? null
   const s = SURAH_LIST.find((x) => x.number === number)
   return s ? s.firstPage : null
 }
 
-/** First page of a juz (1–30), or null if out of range. */
-export function juzStartPage(number) {
-  return JUZ_TO_PAGE_MAP[number] || null
+/** Clamp any value to a valid page number in [1, totalPages] for the mushaf. */
+export function clampPage(n, mushafId = DEFAULT_MUSHAF) {
+  const total = getMushafConfig(mushafId).totalPages
+  const x = Math.floor(Number(n))
+  if (!Number.isFinite(x)) return 1
+  return Math.min(total, Math.max(1, x))
+}
+
+/** First page of a juz (1–30) for the given mushaf, or null if out of range. */
+export function juzStartPage(number, mushafId = DEFAULT_MUSHAF) {
+  const map = isIndoPak(mushafId) ? INDOPAK_JUZ_TO_PAGE_MAP : JUZ_TO_PAGE_MAP
+  return map[number] || null
 }
 
 /**
  * Parse free-form "jump to page" input into a valid page number, or null if it
- * isn't a number at all. Numeric-but-out-of-range values are clamped, matching
- * the app's bounds (1–604).
+ * isn't a number at all. Numeric-but-out-of-range values are clamped to the
+ * mushaf's bounds (Madani 1–604, IndoPak 1–847).
  */
-export function parseJumpPage(input) {
+export function parseJumpPage(input, mushafId = DEFAULT_MUSHAF) {
   const trimmed = String(input ?? '').trim()
   if (!trimmed || !/^\d+$/.test(trimmed)) return null
-  return clampPage(parseInt(trimmed, 10))
+  return clampPage(parseInt(trimmed, 10), mushafId)
 }
 
 /** The surah a given page belongs to (the last surah whose firstPage ≤ page). */
-export function surahForPage(pageNumber) {
+export function surahForPage(pageNumber, mushafId = DEFAULT_MUSHAF) {
   let result = SURAH_LIST[0]
   for (const s of SURAH_LIST) {
-    if (s.firstPage <= pageNumber) result = s
-    else break
+    const fp = surahStartPage(s.number, mushafId)
+    if (fp != null && fp <= pageNumber) result = s
+    else if (fp != null && fp > pageNumber) break
   }
   return result
 }

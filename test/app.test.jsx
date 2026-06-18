@@ -502,26 +502,65 @@ describe('App name gate (lazy editor name)', () => {
   })
 })
 
-// 2026-06-16: the viewer is Madani-only but FALLS BACK to a Madani render for
-// any other edition instead of hard-erroring (was: status='unsupported').
-describe('App mushaf fallback (Madani-only render)', () => {
-  it('a non-Madani (INDOPAK13) link renders the Madani page, not the unsupported error', async () => {
+// IndoPak (INDOPAK13) is now a first-class edition: an INDOPAK13 link renders
+// the IndoPak page (13-line grid, `.page.indopak`), not a Madani fallback. Only
+// an edition we don't render yet still falls back to Madani.
+describe('App mushaf rendering by edition', () => {
+  // IndoPak page data is line-grouped (lines[]), with words carrying their own
+  // surah/ayah — unlike the Madani verses[] shape.
+  const INDOPAK_PAGE = {
+    pageNumber: 1,
+    lines: [
+      {
+        lineNumber: 2, lineType: 'ayah', isCentered: false, surahNumber: 1,
+        words: [{ id: 1, position: 1, text: 'بِسْمِ', surah: 1, ayah: 1, verse_key: '1:1', line_number: 2 }],
+      },
+    ],
+  }
+
+  it('an INDOPAK13 link renders the IndoPak page (13-line grid), not Madani fallback', async () => {
     fetchMeta.mockResolvedValueOnce({ ownerDisplayName: 'Owner', startPage: 1, mushafPref: 'INDOPAK13' })
+    pageMock.page = INDOPAK_PAGE
     const { container } = render(<App />)
-    // It reaches the ready render (a real Qur'an word), and shows no error screen.
     expect(await screen.findByRole('button', { name: "Qur'an word" })).toBeTruthy()
+    expect(container.querySelector('.page.indopak')).toBeTruthy() // IndoPak render path
     expect(container.querySelector('.error-screen')).toBeNull()
   })
 
-  it('a missing mushafPref also renders (legacy/null-pref links)', async () => {
+  it('marking a word in an IndoPak share POSTs the word\'s own surah/ayah/position', async () => {
+    // Proves the script-agnostic mark path: the IndoPak word carries surah/ayah,
+    // and its `position` is sent verbatim — the same coordinate the owner marked
+    // in-app, so the mark round-trips to the right word (no verses[] needed).
+    fetchMeta.mockResolvedValueOnce({ ownerDisplayName: 'Owner', startPage: 1, mushafPref: 'INDOPAK13' })
+    pageMock.page = INDOPAK_PAGE
+    render(<App />)
+    fireEvent.click(await screen.findByRole('button', { name: "Qur'an word" }))
+    await screen.findByRole('dialog', { name: 'Edit Note' })
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+    await waitFor(() => expect(addMistake).toHaveBeenCalledTimes(1))
+    expect(addMistake.mock.calls[0][1]).toMatchObject({
+      surah: 1, ayah: 1, startWordIndex: 1, endWordIndex: 1, note: null,
+    })
+  })
+
+  it('a missing mushafPref renders Madani (legacy/null-pref links)', async () => {
     fetchMeta.mockResolvedValueOnce({ ownerDisplayName: 'Owner', startPage: 1 })
     const { container } = render(<App />)
     expect(await screen.findByRole('button', { name: "Qur'an word" })).toBeTruthy()
+    expect(container.querySelector('.page.indopak')).toBeNull() // Madani, not IndoPak
     expect(container.querySelector('.error-screen')).toBeNull()
   })
 
-  // The 'unsupported' path is dormant but intentionally kept as the IndoPak
-  // re-gate; its ErrorScreen message must stay rendered if/when re-enabled.
+  it('an unknown edition falls back to a Madani render (safety net)', async () => {
+    fetchMeta.mockResolvedValueOnce({ ownerDisplayName: 'Owner', startPage: 1, mushafPref: 'FUTURE99' })
+    const { container } = render(<App />)
+    expect(await screen.findByRole('button', { name: "Qur'an word" })).toBeTruthy()
+    expect(container.querySelector('.page.indopak')).toBeNull()
+    expect(container.querySelector('.error-screen')).toBeNull()
+  })
+
+  // The 'unsupported' path is dormant but intentionally kept as a re-gate for a
+  // future unbuilt edition; its ErrorScreen message must stay rendered.
   it('ErrorScreen still renders the unsupported message (dormant re-gate path)', () => {
     render(<ErrorScreen kind="unsupported" owner="Owner" />)
     expect(screen.getByText(/edition isn’t supported in the web viewer yet/)).toBeTruthy()

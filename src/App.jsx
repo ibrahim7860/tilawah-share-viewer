@@ -3,8 +3,9 @@ import { readToken } from './token.js'
 import { fetchMeta, fetchMistakes, addMistake, updateMistake, deleteMistake, RevokedError } from './api.js'
 import { useActivityReporter } from './useActivityReporter.js'
 import { loadPage, fontFamilyFor, prefetchAround } from './quran/loadPage.js'
-import { clampPage, TOTAL_PAGES } from './quran/nav.js'
-import { HIGHLIGHT_COLORS, isTemplate, wordInMark } from './quran/highlight.js'
+import { clampPage } from './quran/nav.js'
+import { HIGHLIGHT_COLORS, isTemplate, wordInMark, wordVerse } from './quran/highlight.js'
+import { getMushafConfig } from './quran/mushaf.js'
 import { upsertMark, removeMark, keyOf, applyWithRollback } from './state/marks.js'
 import { canApplySnapshot } from './state/liveSync.js'
 import Page from './components/Page.jsx'
@@ -17,16 +18,13 @@ import EditNoteModal from './components/EditNoteModal.jsx'
 import NamePromptModal from './components/NamePromptModal.jsx'
 import { getEditorName, setEditorName } from './identity.js'
 
-// The web viewer renders the Madani (15-line / MADINA15) mushaf ONLY. Links from
-// owners on any other edition fall back to a Madani render (see the load effect
-// below) instead of hard-erroring. ⚠️ This is safe ONLY while the app ignores
-// `mushaf_pref` at render time (so every stored page/mark is Madani-coordinate).
-// WHEN IndoPak rendering ships (PR #14 / `indopak-justify`), THIS MUST CHANGE —
-// add the edition here once the viewer can actually render it, OR the fallback
-// becomes silently wrong (IndoPak pages 1–847 / line marks ≠ Madani 1–604). See
-// plan `2026-06-08-shareable-quran-web-viewer.md` (Update 2026-06-16) + memory
-// `tilawah-indopak-data-audit`.
-const SUPPORTED_MUSHAFS = new Set(['MADINA15'])
+// Editions the viewer can render. Each maps to a quran/mushaf.js config (page
+// dir, font, line count, layout builder). An owner on an edition NOT listed here
+// falls back to a Madani render (see the load effect) rather than hard-erroring;
+// that fallback would mis-highlight (page/word coords differ per edition), so it
+// exists only as a safety net for a future edition we haven't built yet — add
+// the edition here AND to quran/mushaf.js MUSHAFS to actually support it.
+const SUPPORTED_MUSHAFS = new Set(['MADINA15', 'INDOPAK13'])
 
 export default function App() {
   const token = readToken()
@@ -73,7 +71,12 @@ export default function App() {
       setNamePrompt({ resolve })
     })
 
-  const goToPage = (n) => setPageNumber(clampPage(n))
+  // Active mushaf config, derived from the share owner's pref (Madani until meta
+  // loads). Threads through page loading, nav bounds, fonts, and layout so the
+  // whole viewer renders the owner's edition.
+  const cfg = getMushafConfig(meta?.mushafPref)
+
+  const goToPage = (n) => setPageNumber(clampPage(n, cfg.id))
 
   // Touch page flipping on the mushaf itself (RTL flip: swipe right → next
   // page, swipe left → previous). Vertical scrolling stays native.
@@ -97,7 +100,7 @@ export default function App() {
     const dy = t.clientY - s.y
     if (Math.abs(dx) > 56 && Math.abs(dx) > 1.8 * Math.abs(dy)) {
       swipedAt.current = Date.now()
-      setPageNumber((p) => clampPage(p + (dx > 0 ? 1 : -1)))
+      setPageNumber((p) => clampPage(p + (dx > 0 ? 1 : -1), cfg.id))
     }
   }
 
@@ -116,7 +119,7 @@ export default function App() {
       const dy = up.clientY - start.y
       if (Math.abs(dx) > 56 && Math.abs(dx) > 1.8 * Math.abs(dy)) {
         swipedAt.current = Date.now() // the drag's trailing click must not mark a word
-        setPageNumber((p) => clampPage(p + (dx > 0 ? 1 : -1)))
+        setPageNumber((p) => clampPage(p + (dx > 0 ? 1 : -1), cfg.id))
       }
     }, { once: true })
   }
@@ -138,16 +141,15 @@ export default function App() {
         // Independent requests — fetch in parallel (each is a full RTT to the
         // backend, and the cold path used to pay them back-to-back).
         const [m, mks] = await Promise.all([fetchMeta(token), fetchMistakes(token)])
-        // Madani fallback: non-MADINA15 editions render with the Madani viewer
-        // rather than erroring. clampPage bounds startPage to [1,604] and marks
-        // are keyed by (surah,ayah,word) — mushaf-independent — so this can't
-        // crash or mis-highlight today. (Re-gate via SUPPORTED_MUSHAFS when
-        // IndoPak ships — see the constant's note.) Logged, not surfaced to the
-        // recipient, so the fallback stays observable in QA.
+        // An edition we don't render yet falls back to Madani rather than
+        // erroring. The clamp + startPage below use the edition's OWN bounds, so
+        // a supported edition (Madani/IndoPak) is exact; only a future unknown
+        // edition would mis-clamp. Logged (not surfaced) so the fallback stays
+        // observable in QA.
         if (m.mushafPref && !SUPPORTED_MUSHAFS.has(m.mushafPref)) {
           console.warn(`[share-viewer] mushaf "${m.mushafPref}" unsupported — falling back to Madani render`)
         }
-        setMeta(m); setPageNumber(clampPage(m.startPage || 1))
+        setMeta(m); setPageNumber(clampPage(m.startPage || 1, getMushafConfig(m.mushafPref).id))
         setMarks(mks)
         setStatus('ready')
       } catch (e) { setStatus(e instanceof RevokedError ? 'revoked' : 'badtoken') }
@@ -184,12 +186,12 @@ export default function App() {
         const dir = acc < 0 ? 1 : -1
         acc = 0
         lockedUntil = now + 250
-        setPageNumber((p) => clampPage(p + dir))
+        setPageNumber((p) => clampPage(p + dir, cfg.id))
       }
     }
     zone.addEventListener('wheel', onWheel, { passive: false })
     return () => zone.removeEventListener('wheel', onWheel)
-  }, [status])
+  }, [status, cfg.id])
 
   // Keyboard page flipping (RTL book: ← advances, → goes back). Inert while
   // any dialog is open or the focus is in a text field.
@@ -201,11 +203,11 @@ export default function App() {
       if (document.querySelector('[role="dialog"]')) return
       const tag = e.target?.tagName
       if (tag === 'INPUT' || tag === 'TEXTAREA') return
-      setPageNumber((p) => clampPage(p + (e.key === 'ArrowLeft' ? 1 : -1)))
+      setPageNumber((p) => clampPage(p + (e.key === 'ArrowLeft' ? 1 : -1), cfg.id))
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [status])
+  }, [status, cfg.id])
 
   // Fire-and-forget: report the page the viewer settles on so the backend can
   // count this sitting as a session for the link owner. Debounced so rapid
@@ -234,17 +236,17 @@ export default function App() {
   useEffect(() => {
     if (status !== 'ready') return
     let active = true
-    loadPage(pageNumber)
+    loadPage(pageNumber, cfg)
       .then((d) => {
         if (!active) return
         setPage(d); setLoadedPage(pageNumber); setPageError(false)
         // Warm the neighbors so the next flip is instant (deployed parity with
         // local disk). Idle-scheduled and network-guarded inside prefetchAround.
-        prefetchAround(pageNumber)
+        prefetchAround(pageNumber, cfg)
       })
       .catch(() => { if (active) { setPage(null); setPageError(true) } })
     return () => { active = false }
-  }, [pageNumber, status])
+  }, [pageNumber, status, cfg])
 
   if (status === 'badtoken') return <ErrorScreen kind="invalid" />
   if (status === 'revoked') return <ErrorScreen kind="revoked" />
@@ -252,10 +254,9 @@ export default function App() {
   // one-line change in the load effect. ErrorScreen 'unsupported' string stays too.
   if (status === 'unsupported') return <ErrorScreen kind="unsupported" owner={meta?.ownerDisplayName} />
 
-  const verseKeyFor = (pg, word) => {
-    const v = pg.verses.find((vv) => vv.words.some((w) => w.id === word.id))
-    return v ? v.verse_key.split(':').map(Number) : null
-  }
+  // Script-agnostic: IndoPak words carry surah/ayah; Madani derives from the
+  // parent verse. Shared with the highlight matchers.
+  const verseKeyFor = (pg, word) => wordVerse(pg, word)
 
   const selectWord = (word, pg) => {
     // A swipe that ends on a word also fires its click — swallow it.
@@ -347,24 +348,24 @@ export default function App() {
       <Header meta={meta} onBrowse={() => setBrowseOpen(true)} onHelp={() => setHelpOpen(true)} />
       <div className="page-zone" ref={pageZoneRef}
            onTouchStart={onTouchStart} onTouchEnd={onTouchEnd} onPointerDown={onPointerDown}>
-        {page ? <Page page={page} pageNumber={loadedPage} marks={marks} preview={previewMark} onSelectWord={selectWord} />
+        {page ? <Page page={page} pageNumber={loadedPage} cfg={cfg} marks={marks} preview={previewMark} onSelectWord={selectWord} />
           : pageError ? <div className="page-error" role="alert">Couldn't load this page. Try again.</div>
           : <div className="page-skeleton" />}
       </div>
       <nav className="pager">
-        <button className="pager-chevron" aria-label="Next page" disabled={pageNumber >= TOTAL_PAGES}
+        <button className="pager-chevron" aria-label="Next page" disabled={pageNumber >= cfg.totalPages}
                 onClick={() => setPageNumber((p) => p + 1)}>‹</button>
         <button className="page-pill" onClick={() => setBrowseOpen(true)}>
-          Page {pageNumber}<span className="page-total"> / {TOTAL_PAGES}</span>
+          Page {pageNumber}<span className="page-total"> / {cfg.totalPages}</span>
         </button>
         <button className="pager-chevron" aria-label="Previous page" disabled={pageNumber <= 1}
                 onClick={() => setPageNumber((p) => p - 1)}>›</button>
       </nav>
       {browseOpen && (
-        <BrowseDrawer currentPage={pageNumber} onNavigate={goToPage} onClose={() => setBrowseOpen(false)} />
+        <BrowseDrawer currentPage={pageNumber} cfg={cfg} onNavigate={goToPage} onClose={() => setBrowseOpen(false)} />
       )}
       <InstructionModal forceOpen={helpOpen} onClose={() => setHelpOpen(false)} />
-      {selected && <EditNoteModal key={selected.word.id} word={selected.word} family={fontFamilyFor(loadedPage)}
+      {selected && <EditNoteModal key={selected.word.id} word={selected.word} family={fontFamilyFor(loadedPage, cfg)}
         existing={selected.existing}
         onSave={(t) => markWord(t)} onDelete={deleteSelected}
         onPreview={(t) => setSelected((s) => (s ? { ...s, preview: t } : s))}

@@ -125,3 +125,48 @@ export function buildPageLayout(page, pageNumber) {
   }
   return out
 }
+
+// IndoPak lines per page (the 13-line mushaf has its own grid). Unused by the
+// Madani builder above; the IndoPak builder below reads it from the data.
+export const INDOPAK_TOTAL_LINES = 13
+
+/**
+ * Build the render-line list for an IndoPak page. Unlike the Madani builder, the
+ * IndoPak page data already carries an EXPLICIT line structure (`lineType`,
+ * `isCentered`, `surahNumber`) — so there are no banner/basmala heuristics to
+ * apply; we map the data's lines straight to the same render-line shape the
+ * Madani builder emits (`kind`/`lineNumber`/`surahNumber`/`words`/`centered`),
+ * so Page.jsx's <Line> renders both editions unchanged.
+ *
+ * `lineType` values in the data: 'surah_name', 'basmallah', 'ayah'.
+ *
+ * @param {{lines: Array}} page  IndoPak page JSON (see scripts/extract-indopak.mjs)
+ */
+export function buildIndoPakLayout(page) {
+  if (!page?.lines?.length) return []
+  return page.lines.map((l) => {
+    if (l.lineType === 'surah_name') {
+      return { kind: 'surah_name', lineNumber: l.lineNumber, surahNumber: l.surahNumber, centered: true }
+    }
+    if (l.lineType === 'basmallah') {
+      return { kind: 'basmallah', lineNumber: l.lineNumber, surahNumber: l.surahNumber, centered: true }
+    }
+    return {
+      kind: 'ayah',
+      lineNumber: l.lineNumber,
+      surahNumber: l.surahNumber,
+      words: l.words || [],
+      centered: !!l.isCentered,
+    }
+  })
+}
+
+/**
+ * Dispatch to the right layout builder for the active mushaf. `cfg` is a
+ * quran/mushaf.js config; `cfg.layoutKind` is 'madani' | 'indopak'.
+ */
+export function buildLayout(page, pageNumber, cfg) {
+  return cfg?.layoutKind === 'indopak'
+    ? buildIndoPakLayout(page)
+    : buildPageLayout(page, pageNumber)
+}
