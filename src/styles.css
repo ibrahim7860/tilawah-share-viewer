@@ -216,6 +216,13 @@ button:active { opacity: 0.7; }
 .page.page-centered .mushaf-line { flex: 0 0 calc(100% / 15); }
 .page.indopak.page-centered .mushaf-line { flex: 0 0 calc(100% / 13); }
 
+/* IndoPak lines justify to fill the content box, so without extra side padding
+   the first/last word sits hard against the page edge — most visible on mobile,
+   where the page is full-bleed (the desktop page is inset by --page-col). Wider
+   horizontal padding gives breathing room; the fill measures clientWidth, so it
+   re-justifies inside the narrower box (cqw scales the margin with page size). */
+.page.indopak { padding-left: 4.5cqw; padding-right: 4.5cqw; }
+
 /* one of the 15 equal-height line slots */
 .mushaf-line {
   flex: 1 1 0;
