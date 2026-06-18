@@ -68,14 +68,20 @@ async function main() {
     for (const [pageNum, data] of Object.entries(obj)) pages.set(Number(pageNum), data)
   }
 
+  // Validate the full set BEFORE writing anything, so a missing page can't leave
+  // public/pages-indopak half-populated (which a later build would ship as 404s).
+  const missing = []
+  for (let p = 1; p <= TOTAL_PAGES; p++) if (!pages.get(p)) missing.push(p)
+  if (missing.length) throw new Error(`IndoPak pages missing from chunk data: ${missing.join(', ')}`)
+
+  let written = 0
   for (let p = 1; p <= TOTAL_PAGES; p++) {
-    const data = pages.get(p)
-    if (!data) throw new Error(`IndoPak page ${p} missing from chunk data`)
-    await writeFile(path.join(OUT_PAGES, `p${p}.json`), JSON.stringify(normalizePage(data)))
+    await writeFile(path.join(OUT_PAGES, `p${p}.json`), JSON.stringify(normalizePage(pages.get(p))))
+    written++
   }
 
   await copyFile(FONT_SRC, path.join(OUT_FONTS, 'indopak-nastaleeq.woff2'))
-  console.log(`Extracted ${pages.size} IndoPak pages + 1 font`)
+  console.log(`Extracted ${written} IndoPak pages + 1 font`)
 }
 
 // Only generate when run directly (`node scripts/extract-indopak.mjs`), so the

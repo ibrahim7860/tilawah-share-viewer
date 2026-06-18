@@ -86,7 +86,11 @@ function Line({ line, page, family, fill, shortPage, marks, preview, onSelectWor
 // short or, at the floor, clipping). Sparse surah-start pages land near the top,
 // dense mid-surah pages near the bottom; each page is internally uniform.
 const INDOPAK_FILL_MAX = 1.4
-const INDOPAK_FILL_MIN = 0.55
+// Lower bound is a sanity floor only. Real dense lines bottom out around 0.58, so
+// keeping the floor well below that means a freak dense line shrinks to fit
+// rather than clipping at the page edge (the floor just bounds pathological
+// measurements; it should never bind on a real page).
+const INDOPAK_FILL_MIN = 0.4
 
 function AyahLine({ line, page, family, fill, shortPage, marks, preview, onSelectWord }) {
   const ref = useRef(null)
@@ -125,7 +129,12 @@ function AyahLine({ line, page, family, fill, shortPage, marks, preview, onSelec
         // --fit), so targeting the full width leaves a 2–3px residual that can
         // clip the last glyph; undershooting by a few px guarantees no clip for
         // an imperceptible gap. Clamped to the fill band.
-        const s = Math.min(INDOPAK_FILL_MAX, Math.max(INDOPAK_FILL_MIN, (w - 6) / natural))
+        // Guard natural>0: a hidden / zero-width measurement would otherwise make
+        // (w-6)/natural Infinity or negative and flash a wrong scale before the
+        // ResizeObserver re-measures.
+        const s = natural > 0
+          ? Math.min(INDOPAK_FILL_MAX, Math.max(INDOPAK_FILL_MIN, (w - 6) / natural))
+          : 1
         setFits(true)
         if (Math.abs(s - fitRef.current) > 0.005) { fitRef.current = s; setFit(s) }
       } else {
