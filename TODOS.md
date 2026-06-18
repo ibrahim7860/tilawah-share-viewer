@@ -5,12 +5,14 @@
 - **What:** Render IndoPak shared pages with true DigitalKhatt edge-justification
   (kashida letter elongation) so the viewer pixel-matches the app's justified reading
   page, with uniform text size across all pages.
-- **Why:** v1 renders every line at one uniform nastaleeq size. Dense lines fill the
-  width naturally; sparse lines (and short pages) are centered rather than stretched —
-  so lines are NOT all flush edge-to-edge like the app's kashida-justified page. Kashida
-  would let every line fill the width at uniform size.
-- **Trigger:** users want every line flush edge-to-edge, or pixel-parity with the app's
-  reading page becomes a requirement.
+- **Why:** v1 justifies each line by scaling it to fill the width (no kashida), so the
+  filled text size varies with line density (denser → smaller). Short/centered pages
+  (Fatihah, Baqarah's first page, last page) are the exception: their sparse lines would
+  scale UP large enough to overflow the fixed 1/13 row and overlap, so they render at the
+  dense-page size and are centered (not stretched). Kashida would let every line fill the
+  width at ONE uniform size, like the app.
+- **Trigger:** users want uniform text size across pages AND every line flush, or
+  pixel-parity with the app's reading page becomes a requirement.
 - **Start point:** run the app's DigitalKhatt services (`tilawah/src/quran/digitalkhatt/
   qurantext.service.ts` + `just.service.ts`) headless in Node to bake per-line glyph
   layout for all 847 pages, then render in-browser via canvas/CanvasKit with
