@@ -5,6 +5,12 @@ import { getMushafConfig, DEFAULT_MUSHAF } from '../quran/mushaf.js'
 
 const DEFAULT_CFG = getMushafConfig(DEFAULT_MUSHAF)
 
+// How far a sparse short page (Fatihah, Baqarah's first page, the last page) may
+// scale its IndoPak type UP to close the space-between gaps. Bounded by vertical
+// room: a line is one 1/13 row (~12.2cqw tall on a 0.63 page), so at line-height
+// 1.2 the font tops out near 10cqw — 10/7.2(base) ≈ 1.38 before rows would overlap.
+const SHORT_PAGE_MAX = 1.38
+
 /**
  * Renders one mushaf page on a fixed N-line grid (15 for Madani, 13 for IndoPak)
  * where ayah lines are justified edge-to-edge (centered when they're a surah's
@@ -42,6 +48,13 @@ export default function Page({ page, pageNumber, cfg = DEFAULT_CFG, marks, previ
   const totalLines = cfg.linesPerPage
   const isIndoPak = cfg.layoutKind === 'indopak'
 
+  // Short special pages center their occupied lines vertically (real mushaf
+  // proportions) instead of leaving a bottom gap; each line keeps its 1/N grid
+  // height via CSS. Madani: the fixed large-type pages 1–2. IndoPak: any page
+  // not filling the 13-line grid (only Fatihah, Baqarah's first page, and the
+  // final page — 3 of 847; all others are full).
+  const centeredPage = isIndoPak ? lines.length < totalLines : pageNumber <= 2
+
   // IndoPak per-page uniform scale. The CSS base size is intentionally a touch
   // larger than the densest page can fit, so typical pages fill most of the width
   // (tight inter-word gaps, like quran.com). On the rare page where a line would
@@ -55,17 +68,26 @@ export default function Page({ page, pageNumber, cfg = DEFAULT_CFG, marks, previ
     if (!isIndoPak) return
     const el = pageRef.current
     if (!el) return
+    // Per-page scale = the smallest scale any full (non-centered) line needs for
+    // its natural width to meet the container. Normal pages: cap at 1 (shrink-only)
+    // so the approved look is untouched — the base size already fills them. Short
+    // pages (Fatihah, Baqarah's first page, the last page) are sparse, so at the
+    // base size their space-between lines leave enormous gaps; let them scale UP so
+    // the fullest line fills the width (gaps close), capped (SHORT_PAGE_MAX) so the
+    // larger type still clears its 1/13 row vertically without overlapping.
+    const maxScale = centeredPage ? SHORT_PAGE_MAX : 1
     const check = () => {
-      let minScale = 1
-      for (const lineEl of el.querySelectorAll('.ayah-line')) {
+      let scale = Infinity
+      for (const lineEl of el.querySelectorAll('.ayah-line:not(.centered)')) {
         const measured = [...lineEl.children].reduce((sum, c) =>
           sum + c.offsetWidth + (parseFloat(getComputedStyle(c).marginLeft) || 0), 0)
         // De-scale to the natural width at --ip-fit:1 (no feedback loop).
         const natural = measured / ipFitRef.current
         const w = lineEl.clientWidth
-        if (natural > w + 1) minScale = Math.min(minScale, w / natural)
+        if (natural > 0) scale = Math.min(scale, (w - 2) / natural)
       }
-      const clamped = Math.max(0.6, minScale) // floor: pure pathological safety
+      if (!Number.isFinite(scale)) scale = 1
+      const clamped = Math.max(0.6, Math.min(maxScale, scale)) // floor: pathological safety
       if (Math.abs(clamped - ipFitRef.current) > 0.005) { ipFitRef.current = clamped; setIpFit(clamped) }
     }
     check()
@@ -73,14 +95,7 @@ export default function Page({ page, pageNumber, cfg = DEFAULT_CFG, marks, previ
     const ro = new ResizeObserver(check)
     ro.observe(el)
     return () => ro.disconnect()
-  }, [isIndoPak, lines])
-
-  // Short special pages center their occupied lines vertically (real mushaf
-  // proportions) instead of leaving a bottom gap; each line keeps its 1/N grid
-  // height via CSS. Madani: the fixed large-type pages 1–2. IndoPak: any page
-  // not filling the 13-line grid (only Fatihah, Baqarah's first page, and the
-  // final page — 3 of 847; all others are full).
-  const centeredPage = isIndoPak ? lines.length < totalLines : pageNumber <= 2
+  }, [isIndoPak, lines, centeredPage])
 
   // Normal pages: place each render-line on its slot of the N-line grid; gaps
   // stay blank.
