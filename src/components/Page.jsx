@@ -20,8 +20,14 @@ const DEFAULT_CFG = getMushafConfig(DEFAULT_MUSHAF)
  *   - justification: Madani full lines fill the width via the QCF glyphs (each
  *     word a pre-kashida'd glyph). IndoPak has no such per-page glyph font, and a
  *     plain Unicode font can't kashida-fill a line — so it renders like quran.com:
- *     a single uniform font size, every line centered with natural spacing
- *     (ragged, not stretched edge-to-edge). See AyahLine.
+ *     a single uniform font size + `justify-content: space-between`, which spreads
+ *     each line's slack as inter-word gaps. Centered lines (basmala, surah-end)
+ *     center instead. See AyahLine.
+ *   - scaling: Madani shrinks per-line (rare dense QCF line, see AyahLine). IndoPak
+ *     scales PER-PAGE: the whole page shares one `--ip-fit` (the smallest scale any
+ *     of its lines needs), so a dense page shrinks uniformly and never goes jagged
+ *     line-to-line. The base size is set large enough to keep gaps tight on typical
+ *     pages; --ip-fit only ever shrinks (≤1) the densest pages back to fit.
  *
  * Madani pages 1–2 (short, e.g. Al-Fatihah) render only their occupied lines,
  * vertically centered, instead of leaving the lower grid blank.
@@ -35,6 +41,39 @@ export default function Page({ page, pageNumber, cfg = DEFAULT_CFG, marks, previ
   const family = cfg.fontFamilyFor(pageNumber)
   const totalLines = cfg.linesPerPage
   const isIndoPak = cfg.layoutKind === 'indopak'
+
+  // IndoPak per-page uniform scale. The CSS base size is intentionally a touch
+  // larger than the densest page can fit, so typical pages fill most of the width
+  // (tight inter-word gaps, like quran.com). On the rare page where a line would
+  // then overflow, we shrink the WHOLE page by the smallest scale any line needs
+  // — so the page stays internally uniform (no jagged line-to-line sizes) instead
+  // of shrinking lines individually. --ip-fit is shrink-only (≤1).
+  const pageRef = useRef(null)
+  const [ipFit, setIpFit] = useState(1)
+  const ipFitRef = useRef(1)
+  useLayoutEffect(() => {
+    if (!isIndoPak) return
+    const el = pageRef.current
+    if (!el) return
+    const check = () => {
+      let minScale = 1
+      for (const lineEl of el.querySelectorAll('.ayah-line')) {
+        const measured = [...lineEl.children].reduce((sum, c) =>
+          sum + c.offsetWidth + (parseFloat(getComputedStyle(c).marginLeft) || 0), 0)
+        // De-scale to the natural width at --ip-fit:1 (no feedback loop).
+        const natural = measured / ipFitRef.current
+        const w = lineEl.clientWidth
+        if (natural > w + 1) minScale = Math.min(minScale, w / natural)
+      }
+      const clamped = Math.max(0.6, minScale) // floor: pure pathological safety
+      if (Math.abs(clamped - ipFitRef.current) > 0.005) { ipFitRef.current = clamped; setIpFit(clamped) }
+    }
+    check()
+    if (typeof ResizeObserver === 'undefined') return
+    const ro = new ResizeObserver(check)
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [isIndoPak, lines])
 
   // Short special pages center their occupied lines vertically (real mushaf
   // proportions) instead of leaving a bottom gap; each line keeps its 1/N grid
@@ -60,17 +99,22 @@ export default function Page({ page, pageNumber, cfg = DEFAULT_CFG, marks, previ
     .filter(Boolean).join(' ')
 
   return (
-    <div className={pageClass} dir="rtl">
+    <div
+      ref={pageRef}
+      className={pageClass}
+      dir="rtl"
+      style={isIndoPak && ipFit !== 1 ? { '--ip-fit': ipFit } : undefined}
+    >
       {slots.map((l, i) => (
         <div className="mushaf-line" key={i}>
-          {l && <Line line={l} page={page} family={family} marks={marks} preview={preview} onSelectWord={onSelectWord} />}
+          {l && <Line line={l} page={page} family={family} isIndoPak={isIndoPak} marks={marks} preview={preview} onSelectWord={onSelectWord} />}
         </div>
       ))}
     </div>
   )
 }
 
-function Line({ line, page, family, marks, preview, onSelectWord }) {
+function Line({ line, page, family, isIndoPak, marks, preview, onSelectWord }) {
   if (line.kind === 'surah_name') {
     return (
       <div className="surah-banner">
@@ -81,30 +125,23 @@ function Line({ line, page, family, marks, preview, onSelectWord }) {
   if (line.kind === 'basmallah') {
     return <div className="basmala">﷽</div>
   }
-  return <AyahLine line={line} page={page} family={family} marks={marks} preview={preview} onSelectWord={onSelectWord} />
+  return <AyahLine line={line} page={page} family={family} isIndoPak={isIndoPak} marks={marks} preview={preview} onSelectWord={onSelectWord} />
 }
 
-function AyahLine({ line, page, family, marks, preview, onSelectWord }) {
+function AyahLine({ line, page, family, isIndoPak, marks, preview, onSelectWord }) {
   const ref = useRef(null)
-  // Width-driven SHRINK-ONLY fit, measured from the words' intrinsic widths so
-  // it's independent of what's currently applied (no feedback loop). A line whose
-  // natural width exceeds the container scales DOWN to avoid clipping; everything
-  // that fits stays at the uniform CSS font size (--fit stays 1). This is the same
-  // path for both editions:
-  //  - Madani: justification comes from the QCF glyphs themselves (the CSS uses
-  //    space-between, which distributes ~nothing on a connected line); a rare
-  //    dense page shrinks rather than clipping.
-  //  - IndoPak: there is no per-page glyph font and a Unicode font can't
-  //    kashida-fill a line, so we DON'T try to stretch lines edge-to-edge (that
-  //    was the old per-line up/down scale, which made font size vary by density).
-  //    Instead every line renders at one uniform size and is centered (ragged) —
-  //    exactly how quran.com renders IndoPak. The 13-line layout's natural width
-  //    is ≤ the page width by design, so shrink almost never fires; it's only a
-  //    safety net for an outlier line (we can't wrap inside the fixed grid).
+  // Madani: per-line SHRINK-ONLY fit, measured from the words' intrinsic widths so
+  // it's independent of what's applied (no feedback loop). A dense QCF line whose
+  // natural width exceeds the container scales DOWN rather than clipping; lines
+  // that fit stay at the uniform CSS size (--fit stays 1). Justification comes from
+  // the QCF glyphs themselves (space-between distributes ~nothing on a connected
+  // line). IndoPak does NOT use this — it scales per-page (--ip-fit, see Page) so
+  // a dense page stays internally uniform, and it justifies via space-between.
   const [fits, setFits] = useState(true)
   const [fit, setFit] = useState(1)
   const fitRef = useRef(1)
   useLayoutEffect(() => {
+    if (isIndoPak) return // IndoPak is scaled per-page by Page (--ip-fit)
     const el = ref.current
     if (!el) return
     const check = () => {
@@ -123,7 +160,7 @@ function AyahLine({ line, page, family, marks, preview, onSelectWord }) {
     const ro = new ResizeObserver(check)
     ro.observe(el)
     return () => ro.disconnect()
-  }, [line])
+  }, [line, isIndoPak])
 
   // Center only a surah's final/short line or a basmala-area line (the mushaf's
   // own isCentered flag → line.centered); everything else justifies edge-to-edge.
@@ -131,14 +168,14 @@ function AyahLine({ line, page, family, marks, preview, onSelectWord }) {
   // IndoPak space-between distributes the line's slack as inter-word gaps — which
   // is exactly how quran.com's reading view justifies IndoPak (uniform size +
   // justify-content:space-between, no kashida — see VerseText.tsx / pageUtils.ts
-  // in quran.com-frontend-next). A shrunk line (!fits) already spans the full
-  // width, so centering is moot there.
-  const centered = line.centered && fits
+  // in quran.com-frontend-next). IndoPak fits by construction (per-page --ip-fit),
+  // so it always honours line.centered; Madani only centers a line that fits.
+  const centered = line.centered && (isIndoPak || fits)
   return (
     <div
       ref={ref}
       className={centered ? 'ayah-line centered' : 'ayah-line'}
-      style={fit !== 1 ? { '--fit': fit } : undefined}
+      style={!isIndoPak && fit !== 1 ? { '--fit': fit } : undefined}
     >
       {line.words.map((w) => {
         const bg = (preview && wordInMark(page, w, preview))

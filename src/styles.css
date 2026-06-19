@@ -260,12 +260,14 @@ button:active { opacity: 0.7; }
 .page.indopak .word {
   margin-left: 0;
   padding: 0.4cqw 0.55cqw;   /* min inter-word spacing (space-between adds the rest) */
-  /* One uniform size for EVERY IndoPak page (global, like quran.com). Calibrated
-     (measured: densest line across the corpus needs ~6.4cqw) so even the densest
-     13-line page fits the width at --fit:1 — so --fit stays 1 everywhere and the
-     size never varies. shrink-only is then a pure safety net for a freak line.
-     Height headroom: 13 rows of a 0.63 page ≈ 12cqw each, so width binds. */
-  font-size: calc(6.2cqw * var(--fit, 1));
+  /* Uniform IndoPak size. Base 7.2cqw is set a touch above what the densest page
+     can fit, so typical pages fill ~90% of each line — tight inter-word gaps that
+     match quran.com (at the old 6.2cqw, lines filled ~79% and read too spaced).
+     --ip-fit (set per-page by Page.jsx) is shrink-only: it only kicks in on the
+     few densest pages, scaling the WHOLE page down uniformly so it stays internally
+     even (no jagged line-to-line sizes). Height headroom: 13 rows of a 0.63 page
+     ≈ 12cqw each, so width binds, not height. */
+  font-size: calc(7.2cqw * var(--ip-fit, 1));
   line-height: 1.2;
 }
 
