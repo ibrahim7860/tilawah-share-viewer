@@ -8,6 +8,13 @@
 //   INDOPAK13 — 13-line IndoPak mushaf, 847 pages, ONE Unicode nastaleeq font for
 //               every page (browser-shaped; no per-page font, no live justifier).
 //
+// `pageLabelOffset` is added to the INTERNAL page number only for DISPLAY (the
+// pager pill + browse drawer), never for data: the printed IndoPak mushaf counts a
+// decorative opening leaf as page 1, so Al-Fatihah is its page 2 and Al-Baqarah's
+// first page is page 3 — one ahead of our internal numbering (which has no opening
+// leaf). Madani prints number Al-Fatihah as page 1, so its offset is 0. Marks
+// (stored by surah/ayah/word) and the backend `startPage` stay on internal numbers.
+//
 // Keep this module dependency-free (nav.js imports it for page bounds) so there
 // is no import cycle.
 
@@ -18,6 +25,7 @@ export const MUSHAFS = {
     linesPerPage: 15,
     pagesDir: '/pages',
     layoutKind: 'madani',
+    pageLabelOffset: 0,
     fontFamilyFor: (pageNumber) => `p${pageNumber}`,
   },
   INDOPAK13: {
@@ -26,6 +34,7 @@ export const MUSHAFS = {
     linesPerPage: 13,
     pagesDir: '/pages-indopak',
     layoutKind: 'indopak',
+    pageLabelOffset: 1,
     fontFamilyFor: () => 'indopak-nastaleeq',
   },
 }

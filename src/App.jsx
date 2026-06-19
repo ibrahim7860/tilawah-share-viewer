@@ -356,7 +356,7 @@ export default function App() {
         <button className="pager-chevron" aria-label="Next page" disabled={pageNumber >= cfg.totalPages}
                 onClick={() => setPageNumber((p) => p + 1)}>‹</button>
         <button className="page-pill" onClick={() => setBrowseOpen(true)}>
-          Page {pageNumber}<span className="page-total"> / {cfg.totalPages}</span>
+          Page {pageNumber + cfg.pageLabelOffset}<span className="page-total"> / {cfg.totalPages + cfg.pageLabelOffset}</span>
         </button>
         <button className="pager-chevron" aria-label="Previous page" disabled={pageNumber <= 1}
                 onClick={() => setPageNumber((p) => p - 1)}>›</button>
