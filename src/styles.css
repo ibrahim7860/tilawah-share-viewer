@@ -216,11 +216,10 @@ button:active { opacity: 0.7; }
 .page.page-centered .mushaf-line { flex: 0 0 calc(100% / 15); }
 .page.indopak.page-centered .mushaf-line { flex: 0 0 calc(100% / 13); }
 
-/* IndoPak lines justify to fill the content box, so without extra side padding
-   the first/last word sits hard against the page edge — most visible on mobile,
-   where the page is full-bleed (the desktop page is inset by --page-col). Wider
-   horizontal padding gives breathing room; the fill measures clientWidth, so it
-   re-justifies inside the narrower box (cqw scales the margin with page size). */
+/* IndoPak side padding: keeps the centered lines off the page edge — most
+   visible on mobile, where the page is full-bleed (the desktop page is inset by
+   --page-col). cqw scales the margin with page size; the shrink-only fit
+   measures clientWidth, so an outlier line still fits inside the narrower box. */
 .page.indopak { padding-left: 4.5cqw; padding-right: 4.5cqw; }
 
 /* one of the 15 equal-height line slots */
@@ -245,37 +244,29 @@ button:active { opacity: 0.7; }
 .ayah-line.centered { justify-content: center; }
 
 /* IndoPak: one Unicode nastaleeq font (not the connected per-page QCF glyphs),
-   so words are DISCRETE. Drop the QCF glyph-overlap trick (negative margin), give
-   the cursive vertical room for its diacritics, and a little inter-word breathing
-   space on centered lines so words don't crowd. */
+   so words are DISCRETE. We can't kashida-fill a line with a Unicode font, so we
+   justify exactly like quran.com's reading view (VerseText.tsx in
+   quran.com-frontend-next): ONE uniform font size + justify-content:space-between
+   on every full line, which distributes the line's slack as even inter-word gaps.
+   Only the mushaf's own centered lines (basmala, surah-end partials — line.centered)
+   center instead. Drop the QCF glyph-overlap trick (negative margin) and give the
+   cursive vertical room for its diacritics. space-between is inherited from the
+   base .ayah-line rule; .ayah-line.centered (lower specificity than the old
+   override, which is now removed) re-centers the flagged lines. */
 .page.indopak .ayah-line { align-items: flex-start; }
-/* Full lines pack flush from the edge; the per-line --fit scale (Page.jsx) grows
-   the whole line so its natural width fills the container — justified WITHOUT
-   space-between gaps. Centered (final/short) lines keep their natural size. */
-.page.indopak .ayah-line:not(.centered) { justify-content: flex-start; }
+/* Centered IndoPak lines have no space-between to separate words, so add a small
+   gap (Madani's centered QCF lines must NOT — they connect — so scope to indopak). */
 .page.indopak .ayah-line.centered { gap: 0.6cqw; }
 .page.indopak .word {
   margin-left: 0;
-  padding: 0.4cqw 0.45cqw;   /* horizontal padding = the inter-word spacing (measured into the fit) */
-  font-size: calc(11cqw * var(--fit, 1));   /* sized so a typical full line fills at --fit≈1 */
+  padding: 0.4cqw 0.55cqw;   /* min inter-word spacing (space-between adds the rest) */
+  /* One uniform size for EVERY IndoPak page (global, like quran.com). Calibrated
+     (measured: densest line across the corpus needs ~6.4cqw) so even the densest
+     13-line page fits the width at --fit:1 — so --fit stays 1 everywhere and the
+     size never varies. shrink-only is then a pure safety net for a freak line.
+     Height headroom: 13 rows of a 0.63 page ≈ 12cqw each, so width binds. */
+  font-size: calc(6.2cqw * var(--fit, 1));
   line-height: 1.2;
-}
-
-/* Short/centered pages ONLY (Fatihah, Baqarah's first page, the last page):
-   their sparse lines would scale UP to fill the width (Page.jsx skips the
-   up-scale here via shortPage), so render them at the dense-page size — which
-   fits the 1/13 row, so nastaleeq's tall marks no longer overlap the next line —
-   and CENTER each line (a sparse line is naturally short). Dense pages are
-   untouched (they keep the per-line width-fill). */
-.page.indopak.page-centered .ayah-line { justify-content: center; }
-/* Short pages render at a fixed size, so a full line (e.g. p2 line 1:
-   الٓمّٓ ذٰلِكَ الْكِتٰبُ لَا رَيْبَ ۛۖۚ فِيْهِ) packs to the edge with no room — its
-   nastaleeq waqf marks then touch the next word. Give short-page words extra
-   inter-word padding; a line that no longer fits just shrinks (shrink-only). */
-.page.indopak.page-centered .word {
-  font-size: calc(7.5cqw * var(--fit, 1));
-  padding-left: 1.2cqw;
-  padding-right: 1.2cqw;
 }
 
 .word {

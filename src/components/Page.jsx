@@ -17,6 +17,11 @@ const DEFAULT_CFG = getMushafConfig(DEFAULT_MUSHAF)
  *   - font: Madani uses a per-page QCF family (`p{N}`); IndoPak uses one Unicode
  *     nastaleeq family for every page (the `.indopak` class drops the QCF
  *     glyph-overlap trick, which only applies to the connected QCF glyphs).
+ *   - justification: Madani full lines fill the width via the QCF glyphs (each
+ *     word a pre-kashida'd glyph). IndoPak has no such per-page glyph font, and a
+ *     plain Unicode font can't kashida-fill a line — so it renders like quran.com:
+ *     a single uniform font size, every line centered with natural spacing
+ *     (ragged, not stretched edge-to-edge). See AyahLine.
  *
  * Madani pages 1–2 (short, e.g. Al-Fatihah) render only their occupied lines,
  * vertically centered, instead of leaving the lower grid blank.
@@ -58,14 +63,14 @@ export default function Page({ page, pageNumber, cfg = DEFAULT_CFG, marks, previ
     <div className={pageClass} dir="rtl">
       {slots.map((l, i) => (
         <div className="mushaf-line" key={i}>
-          {l && <Line line={l} page={page} family={family} fill={isIndoPak} shortPage={centeredPage} marks={marks} preview={preview} onSelectWord={onSelectWord} />}
+          {l && <Line line={l} page={page} family={family} marks={marks} preview={preview} onSelectWord={onSelectWord} />}
         </div>
       ))}
     </div>
   )
 }
 
-function Line({ line, page, family, fill, shortPage, marks, preview, onSelectWord }) {
+function Line({ line, page, family, marks, preview, onSelectWord }) {
   if (line.kind === 'surah_name') {
     return (
       <div className="surah-banner">
@@ -76,40 +81,26 @@ function Line({ line, page, family, fill, shortPage, marks, preview, onSelectWor
   if (line.kind === 'basmallah') {
     return <div className="basmala">﷽</div>
   }
-  return <AyahLine line={line} page={page} family={family} fill={fill} shortPage={shortPage} marks={marks} preview={preview} onSelectWord={onSelectWord} />
+  return <AyahLine line={line} page={page} family={family} marks={marks} preview={preview} onSelectWord={onSelectWord} />
 }
 
-// Per-line fill scale band for IndoPak. A full line scales so its natural width
-// fills the container (justification without kashida). The FILLED text size is
-// set by the line's density (more/longer words → smaller) — inherent — so the
-// band must be wide enough that no real page clamps (which would leave a line
-// short or, at the floor, clipping). Sparse surah-start pages land near the top,
-// dense mid-surah pages near the bottom; each page is internally uniform.
-const INDOPAK_FILL_MAX = 1.4
-// Lower bound is a sanity floor only. Real dense lines bottom out around 0.58, so
-// keeping the floor well below that means a freak dense line shrinks to fit
-// rather than clipping at the page edge (the floor just bounds pathological
-// measurements; it should never bind on a real page).
-const INDOPAK_FILL_MIN = 0.4
-
-function AyahLine({ line, page, family, fill, shortPage, marks, preview, onSelectWord }) {
+function AyahLine({ line, page, family, marks, preview, onSelectWord }) {
   const ref = useRef(null)
-  // Width-driven scaling, measured from the words' intrinsic widths so it's
-  // independent of what's currently applied (no feedback loop):
-  //  - Madani (and IndoPak centered/final lines): shrink-only `fit` — a dense
-  //    line whose natural width exceeds the container scales DOWN to avoid
-  //    clipping; short lines stay centered. Justification comes from the QCF
-  //    glyphs themselves (space-between distributes ~nothing).
-  //  - IndoPak full lines (`fill`): the single nastaleeq font leaves slack that
-  //    space-between would spread into ugly gaps. Instead scale the WHOLE line
-  //    up/down so its natural width fills the container — uniform per-line
-  //    scaling at natural spacing, which reads as justified without kashida.
-  //  - EXCEPTION — short/centered pages (`shortPage`, i.e. Fatihah, Baqarah's
-  //    first page, the last page): their lines are sparse, so width-fill would
-  //    scale them UP large enough that nastaleeq's tall marks overflow the fixed
-  //    1/13 row and overlap neighbours. There, fall back to shrink-only at the
-  //    dense-page size (CSS) and center the lines — no up-scaling, no overlap.
-  const fillLine = fill && !line.centered && !shortPage
+  // Width-driven SHRINK-ONLY fit, measured from the words' intrinsic widths so
+  // it's independent of what's currently applied (no feedback loop). A line whose
+  // natural width exceeds the container scales DOWN to avoid clipping; everything
+  // that fits stays at the uniform CSS font size (--fit stays 1). This is the same
+  // path for both editions:
+  //  - Madani: justification comes from the QCF glyphs themselves (the CSS uses
+  //    space-between, which distributes ~nothing on a connected line); a rare
+  //    dense page shrinks rather than clipping.
+  //  - IndoPak: there is no per-page glyph font and a Unicode font can't
+  //    kashida-fill a line, so we DON'T try to stretch lines edge-to-edge (that
+  //    was the old per-line up/down scale, which made font size vary by density).
+  //    Instead every line renders at one uniform size and is centered (ragged) —
+  //    exactly how quran.com renders IndoPak. The 13-line layout's natural width
+  //    is ≤ the page width by design, so shrink almost never fires; it's only a
+  //    safety net for an outlier line (we can't wrap inside the fixed grid).
   const [fits, setFits] = useState(true)
   const [fit, setFit] = useState(1)
   const fitRef = useRef(1)
@@ -123,33 +114,25 @@ function AyahLine({ line, page, family, fill, shortPage, marks, preview, onSelec
       // the cqw-based paddings don't scale with the font).
       const natural = measured / fitRef.current
       const w = el.clientWidth
-      if (fillLine) {
-        // Fill: grow or shrink so the natural width meets the container, minus a
-        // small epsilon. The word padding is in fixed cqw (doesn't scale with
-        // --fit), so targeting the full width leaves a 2–3px residual that can
-        // clip the last glyph; undershooting by a few px guarantees no clip for
-        // an imperceptible gap. Clamped to the fill band.
-        // Guard natural>0: a hidden / zero-width measurement would otherwise make
-        // (w-6)/natural Infinity or negative and flash a wrong scale before the
-        // ResizeObserver re-measures.
-        const s = natural > 0
-          ? Math.min(INDOPAK_FILL_MAX, Math.max(INDOPAK_FILL_MIN, (w - 6) / natural))
-          : 1
-        setFits(true)
-        if (Math.abs(s - fitRef.current) > 0.005) { fitRef.current = s; setFit(s) }
-      } else {
-        setFits(natural <= w + 1)
-        const s = natural > w + 1 ? Math.max(0.75, w / natural) : 1
-        if (Math.abs(s - fitRef.current) > 0.005) { fitRef.current = s; setFit(s) }
-      }
+      setFits(natural <= w + 1)
+      const s = natural > w + 1 ? Math.max(0.75, w / natural) : 1
+      if (Math.abs(s - fitRef.current) > 0.005) { fitRef.current = s; setFit(s) }
     }
     check()
     if (typeof ResizeObserver === 'undefined') return
     const ro = new ResizeObserver(check)
     ro.observe(el)
     return () => ro.disconnect()
-  }, [line, fillLine])
+  }, [line])
 
+  // Center only a surah's final/short line or a basmala-area line (the mushaf's
+  // own isCentered flag → line.centered); everything else justifies edge-to-edge.
+  // For Madani that justification is the QCF glyphs (space-between adds ~0); for
+  // IndoPak space-between distributes the line's slack as inter-word gaps — which
+  // is exactly how quran.com's reading view justifies IndoPak (uniform size +
+  // justify-content:space-between, no kashida — see VerseText.tsx / pageUtils.ts
+  // in quran.com-frontend-next). A shrunk line (!fits) already spans the full
+  // width, so centering is moot there.
   const centered = line.centered && fits
   return (
     <div
