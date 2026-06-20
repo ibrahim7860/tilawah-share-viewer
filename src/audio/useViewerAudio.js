@@ -19,30 +19,36 @@ export function useViewerAudio({ onAyahChange, onNeedNextPage } = {}) {
   const [isPlaying, setIsPlaying] = useState(false)
   const [verseKey, setVerseKey] = useState(null)
 
-  onNeedNextPageRef.current = onNeedNextPage
+  // Keep the latest onNeedNextPage without re-subscribing the `ended` listener.
+  useEffect(() => { onNeedNextPageRef.current = onNeedNextPage }, [onNeedNextPage])
 
-  if (typeof Audio !== 'undefined') {
+  // Lazily get/create the primary <audio> element (outside render to satisfy the
+  // refs-during-render rule). The second, never-played element warms the
+  // browser's byte cache for the upcoming ayah so playback starts gap-free.
+  const getAudio = useCallback(() => {
+    if (typeof Audio === 'undefined') return null
     if (!audioRef.current) audioRef.current = new Audio()
-    // A second, never-played element used purely to warm the browser's byte
-    // cache for the upcoming ayah so playback starts without an audible gap.
-    if (!prefetchRef.current) {
-      prefetchRef.current = new Audio()
-      prefetchRef.current.preload = 'auto'
-    }
-  }
+    return audioRef.current
+  }, [])
+  const getPrefetch = useCallback(() => {
+    if (typeof Audio === 'undefined') return null
+    if (!prefetchRef.current) { prefetchRef.current = new Audio(); prefetchRef.current.preload = 'auto' }
+    return prefetchRef.current
+  }, [])
 
   // Warm ayah N+1 (and, near the page end, the next page's audio JSON) so the
   // next advance is instant.
   const prefetch = useCallback((i) => {
     const { ayahs } = queueRef.current
     const nextAyah = ayahs[i + 1]
-    if (nextAyah && prefetchRef.current) prefetchRef.current.src = nextAyah.audioUrl
+    const pf = getPrefetch()
+    if (nextAyah && pf) pf.src = nextAyah.audioUrl
     // Within one ayah of the page end: ask the caller to fetch the next page's
     // audio early so onNeedNextPage resolves instantly.
     if (i + 1 >= ayahs.length && onNeedNextPageRef.current?.prefetch) {
       onNeedNextPageRef.current.prefetch(currentPageRef.current + 1)
     }
-  }, [])
+  }, [getPrefetch])
 
   const playIndex = useCallback((i) => {
     const { ayahs } = queueRef.current
@@ -55,10 +61,13 @@ export function useViewerAudio({ onAyahChange, onNeedNextPage } = {}) {
     const ayah = ayahs[i]
     setVerseKey(ayah.verseKey)
     onAyahChange && onAyahChange(ayah.verseKey)
-    audioRef.current.src = ayah.audioUrl
-    audioRef.current.play().then(() => setIsPlaying(true)).catch(() => {})
+    const el = getAudio()
+    if (el) {
+      el.src = ayah.audioUrl
+      el.play().then(() => setIsPlaying(true)).catch(() => {})
+    }
     prefetch(i)
-  }, [onAyahChange, prefetch])
+  }, [onAyahChange, prefetch, getAudio])
 
   // Route page-end behavior through the pure decideNext: play the next ayah,
   // hand off to onNeedNextPage at a page boundary, or stop at the last page.
@@ -99,12 +108,12 @@ export function useViewerAudio({ onAyahChange, onNeedNextPage } = {}) {
   }, [onAyahChange])
 
   useEffect(() => {
-    const el = audioRef.current
+    const el = getAudio()
     if (!el) return
     const onEnded = () => step()
     el.addEventListener('ended', onEnded)
     return () => el.removeEventListener('ended', onEnded)
-  }, [step])
+  }, [step, getAudio])
 
   return { start, setCurrentPage, pause, resume, next, prev, stop, isActive, isPlaying, verseKey }
 }

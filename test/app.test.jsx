@@ -10,6 +10,14 @@ vi.mock('../src/api.js', () => ({
   addMistake: vi.fn(() => Promise.resolve({})),
   updateMistake: vi.fn(() => Promise.resolve({})),
   deleteMistake: vi.fn(() => Promise.resolve({})),
+  reportActivity: vi.fn(() => Promise.resolve(null)),
+}))
+
+// Mock the audio module so the on-mount reciter fetch (and tap-to-play) make no
+// real network calls — same rationale as the api/loadPage mocks above.
+vi.mock('../src/audio.js', () => ({
+  fetchReciters: vi.fn(() => Promise.resolve({ reciters: [{ id: 7, name: 'Mishary Rashid Alafasy', style: 'Murattal' }], defaultReciterId: 7 })),
+  fetchPageAudio: vi.fn(() => Promise.resolve({ pageNumber: 1, reciterId: 7, ayahs: [] })),
 }))
 
 import { addMistake, updateMistake, deleteMistake, fetchMistakes, fetchMeta, RevokedError } from '../src/api.js'

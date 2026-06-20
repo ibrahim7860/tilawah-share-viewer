@@ -9,6 +9,9 @@ import { getMushafConfig } from './quran/mushaf.js'
 import { upsertMark, removeMark, keyOf, applyWithRollback } from './state/marks.js'
 import { canApplySnapshot } from './state/liveSync.js'
 import Page from './components/Page.jsx'
+import AudioBar from './components/AudioBar.jsx'
+import { useViewerAudio } from './audio/useViewerAudio.js'
+import { fetchPageAudio, fetchReciters } from './audio.js'
 import Header from './components/Header.jsx'
 import BrowseDrawer from './components/BrowseDrawer.jsx'
 import InstructionModal from './components/InstructionModal.jsx'
@@ -77,6 +80,52 @@ export default function App() {
   const cfg = getMushafConfig(meta?.mushafPref)
 
   const goToPage = (n) => setPageNumber(clampPage(n, cfg.id))
+
+  // ---- Ayah audio playback ----------------------------------------------
+  const [audioVisible, setAudioVisible] = useState(false)
+  const [reciterId, setReciterId] = useState(7)
+  const [reciters, setReciters] = useState([{ id: 7, name: 'Mishary Rashid Alafasy', style: 'Murattal' }])
+  const [activeVerseKey, setActiveVerseKey] = useState(null)
+  const [reciterPickerOpen, setReciterPickerOpen] = useState(false)
+  const reciterIdRef = useRef(7)
+  useEffect(() => { reciterIdRef.current = reciterId }, [reciterId])
+
+  useEffect(() => {
+    fetchReciters().then(({ reciters: list }) => { if (list?.length) setReciters(list) }).catch(() => {})
+  }, [])
+
+  // onNeedNextPage: flip to the next page, load its audio, and continue the
+  // queue from its first ayah. A function with a `.load`/`.prefetch` shape so
+  // the hook can warm the next page early (Amendment 8).
+  const loadNextPage = async (page) => {
+    if (page > cfg.totalPages) { viewerAudio.stop(); setAudioVisible(false); return }
+    goToPage(page)
+    viewerAudio.setCurrentPage(page)
+    const { ayahs } = await fetchPageAudio(page, reciterIdRef.current)
+    if (ayahs.length) viewerAudio.start(ayahs, ayahs[0].verseKey, page)
+    else { viewerAudio.stop(); setAudioVisible(false) }
+  }
+  loadNextPage.load = loadNextPage
+  loadNextPage.prefetch = (page) => { if (page <= cfg.totalPages) fetchPageAudio(page, reciterIdRef.current).catch(() => {}) }
+
+  const viewerAudio = useViewerAudio({
+    onAyahChange: (vk) => setActiveVerseKey(vk), // within a page no flip is needed (Amendment 1)
+    onNeedNextPage: loadNextPage,
+  })
+
+  async function playFromVerse(verseKey) {
+    const { ayahs } = await fetchPageAudio(pageNumber, reciterId)
+    if (!ayahs.length) return
+    setAudioVisible(true)
+    // Fall back to the first ayah on the page if the requested verseKey isn't in
+    // the returned set (start() already clamps unknown keys to index 0).
+    viewerAudio.start(ayahs, verseKey ?? ayahs[0].verseKey, pageNumber)
+  }
+
+  // Play from the start of the current page (handles Madani `verses[]` and
+  // IndoPak word-carried surah/ayah uniformly): just play the page's audio from
+  // its first ayah.
+  const playPageFromStart = () => playFromVerse(null)
 
   // Touch page flipping on the mushaf itself (RTL flip: swipe right → next
   // page, swipe left → previous). Vertical scrolling stays native.
@@ -248,6 +297,10 @@ export default function App() {
     return () => { active = false }
   }, [pageNumber, status, cfg])
 
+  // Keep the audio hook's notion of the current page in sync with manual flips
+  // so decideNext judges page boundaries against the visible page.
+  useEffect(() => { viewerAudio.setCurrentPage(pageNumber) }, [pageNumber, viewerAudio])
+
   if (status === 'badtoken') return <ErrorScreen kind="invalid" />
   if (status === 'revoked') return <ErrorScreen kind="revoked" />
   // Dormant since 2026-06-16 (Madani fallback) — kept so re-gating IndoPak is a
@@ -348,7 +401,9 @@ export default function App() {
       <Header meta={meta} onBrowse={() => setBrowseOpen(true)} onHelp={() => setHelpOpen(true)} />
       <div className="page-zone" ref={pageZoneRef}
            onTouchStart={onTouchStart} onTouchEnd={onTouchEnd} onPointerDown={onPointerDown}>
-        {page ? <Page page={page} pageNumber={loadedPage} cfg={cfg} marks={marks} preview={previewMark} onSelectWord={selectWord} />
+        {page ? <Page page={page} pageNumber={loadedPage} cfg={cfg} marks={marks} preview={previewMark} onSelectWord={selectWord}
+            activeVerseKey={activeVerseKey}
+            onPlayWord={(w, pg) => { const v = wordVerse(pg, w); if (v) playFromVerse(`${v[0]}:${v[1]}`) }} />
           : pageError ? <div className="page-error" role="alert">Couldn't load this page. Try again.</div>
           : <div className="page-skeleton" />}
       </div>
@@ -360,6 +415,8 @@ export default function App() {
         </button>
         <button className="pager-chevron" aria-label="Previous page" disabled={pageNumber <= 1}
                 onClick={() => setPageNumber((p) => p - 1)}>›</button>
+        <button className="pager-chevron" aria-label="Play page recitation"
+                onClick={playPageFromStart}>▶</button>
       </nav>
       {browseOpen && (
         <BrowseDrawer currentPage={pageNumber} cfg={cfg} onNavigate={goToPage} onClose={() => setBrowseOpen(false)} />
@@ -378,6 +435,28 @@ export default function App() {
       )}
       {undo && <UndoSnackbar onUndo={undoDelete} onExpire={() => setUndo(null)} />}
       {toast && <div className="toast" role="status">{toast}</div>}
+      {reciterPickerOpen && (
+        <select
+          className="reciter-select"
+          value={reciterId}
+          onChange={(e) => { setReciterId(Number(e.target.value)); setReciterPickerOpen(false) }}
+          onBlur={() => setReciterPickerOpen(false)}
+          autoFocus
+        >
+          {reciters.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
+        </select>
+      )}
+      <AudioBar
+        visible={audioVisible}
+        isPlaying={viewerAudio.isPlaying}
+        verseKey={viewerAudio.verseKey}
+        reciterName={(reciters.find((r) => r.id === reciterId) || {}).name || 'Reciter'}
+        onPlayPause={() => (viewerAudio.isPlaying ? viewerAudio.pause() : viewerAudio.resume())}
+        onPrev={() => viewerAudio.prev()}
+        onNext={() => viewerAudio.next()}
+        onPickReciter={() => setReciterPickerOpen((o) => !o)}
+        onClose={() => { viewerAudio.stop(); setAudioVisible(false) }}
+      />
     </div>
   )
 }
