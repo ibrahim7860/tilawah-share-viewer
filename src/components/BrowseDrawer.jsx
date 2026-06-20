@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import Modal from './Modal.jsx'
 import {
-  SURAH_LIST, JUZ_LIST, surahStartPage, juzStartPage, parseJumpPage, surahForPage, TOTAL_PAGES,
+  SURAH_LIST, JUZ_LIST, surahStartPage, juzStartPage, parseJumpPage, surahForPage,
 } from '../quran/nav.js'
 
 /**
@@ -9,21 +9,27 @@ import {
  * jump straight to a page. Selecting anything navigates and closes the drawer.
  * Rendered through the shared Modal primitive (overlay/Escape/focus handling).
  *
+ * All page numbers come from the active mushaf (`cfg`): the surah/juz tables and
+ * total page count differ between Madani (604) and IndoPak (847), so a jump
+ * lands on the right page for the owner's edition.
+ *
  * @param {number} currentPage - page currently shown (to highlight where we are)
+ * @param {object} cfg - quran/mushaf.js config for the active edition
  * @param {(page:number)=>void} onNavigate
  * @param {()=>void} onClose
  */
-export default function BrowseDrawer({ currentPage, onNavigate, onClose }) {
+export default function BrowseDrawer({ currentPage, cfg, onNavigate, onClose }) {
   const [tab, setTab] = useState('surah') // surah | juz | page
   const [jump, setJump] = useState('')
   const [jumpError, setJumpError] = useState(false)
-  const activeSurah = surahForPage(currentPage)
+  const m = cfg.id
+  const activeSurah = surahForPage(currentPage, m)
 
   const go = (page) => { if (page) { onNavigate(page); onClose() } }
 
   const submitJump = (e) => {
     e.preventDefault()
-    const page = parseJumpPage(jump)
+    const page = parseJumpPage(jump, m)
     if (page == null) { setJumpError(true); return }
     go(page)
   }
@@ -44,39 +50,45 @@ export default function BrowseDrawer({ currentPage, onNavigate, onClose }) {
 
       {tab === 'surah' && (
         <ul className="drawer-list" id="panel-surah" role="tabpanel" aria-labelledby="tab-surah" aria-label="Surahs">
-          {SURAH_LIST.map((s) => (
-            <li key={s.number}>
-              <button className={s.number === activeSurah?.number ? 'drawer-row current' : 'drawer-row'}
-                      onClick={() => go(surahStartPage(s.number))}>
-                <span className="drawer-num">{s.number}</span>
-                <span className="drawer-name" dir="rtl">{s.name}</span>
-                <span className="drawer-page">p.{s.firstPage}</span>
-              </button>
-            </li>
-          ))}
+          {SURAH_LIST.map((s) => {
+            const fp = surahStartPage(s.number, m)
+            return (
+              <li key={s.number}>
+                <button className={s.number === activeSurah?.number ? 'drawer-row current' : 'drawer-row'}
+                        onClick={() => go(fp)}>
+                  <span className="drawer-num">{s.number}</span>
+                  <span className="drawer-name" dir="rtl">{s.name}</span>
+                  <span className="drawer-page">p.{fp}</span>
+                </button>
+              </li>
+            )
+          })}
         </ul>
       )}
 
       {tab === 'juz' && (
         <ul className="drawer-list" id="panel-juz" role="tabpanel" aria-labelledby="tab-juz" aria-label="Juz">
-          {JUZ_LIST.map((j) => (
-            <li key={j.number}>
-              <button className="drawer-row" onClick={() => go(juzStartPage(j.number))}>
-                <span className="drawer-num">{j.number}</span>
-                <span className="drawer-name" dir="rtl">{j.name}</span>
-                <span className="drawer-page">p.{juzStartPage(j.number)}</span>
-              </button>
-            </li>
-          ))}
+          {JUZ_LIST.map((j) => {
+            const jp = juzStartPage(j.number, m)
+            return (
+              <li key={j.number}>
+                <button className="drawer-row" onClick={() => go(jp)}>
+                  <span className="drawer-num">{j.number}</span>
+                  <span className="drawer-name" dir="rtl">{j.name}</span>
+                  <span className="drawer-page">p.{jp}</span>
+                </button>
+              </li>
+            )
+          })}
         </ul>
       )}
 
       {tab === 'page' && (
         <form className="drawer-jump" id="panel-page" role="tabpanel" aria-labelledby="tab-page"
               onSubmit={submitJump} noValidate>
-          <label htmlFor="jump-page">Go to page (1–{TOTAL_PAGES})</label>
+          <label htmlFor="jump-page">Go to page (1–{cfg.totalPages})</label>
           <div className="drawer-jump-row">
-            <input id="jump-page" type="number" inputMode="numeric" min="1" max={TOTAL_PAGES}
+            <input id="jump-page" type="number" inputMode="numeric" min="1" max={cfg.totalPages}
                    value={jump} placeholder={String(currentPage)}
                    onChange={(e) => { setJump(e.target.value); setJumpError(false) }} />
             <button type="submit">Go</button>
