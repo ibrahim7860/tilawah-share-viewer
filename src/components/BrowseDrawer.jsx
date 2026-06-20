@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import Modal from './Modal.jsx'
 import {
-  SURAH_LIST, JUZ_LIST, surahStartPage, juzStartPage, clampPage, surahForPage,
+  SURAH_LIST, JUZ_LIST, surahStartPage, juzStartPage, parseJumpPage, surahForPage,
 } from '../quran/nav.js'
 
 /**
@@ -23,20 +23,15 @@ export default function BrowseDrawer({ currentPage, cfg, onNavigate, onClose }) 
   const [jump, setJump] = useState('')
   const [jumpError, setJumpError] = useState(false)
   const m = cfg.id
-  // Displayed page numbers are internal + offset (the IndoPak print's decorative
-  // opening leaf — see quran/mushaf.js). Convert internal→shown for labels and
-  // shown→internal for the jump input. Madani offset is 0 (no-op).
-  const off = cfg.pageLabelOffset || 0
-  const shown = (internal) => internal + off
   const activeSurah = surahForPage(currentPage, m)
 
   const go = (page) => { if (page) { onNavigate(page); onClose() } }
 
   const submitJump = (e) => {
     e.preventDefault()
-    const trimmed = jump.trim()
-    if (!/^\d+$/.test(trimmed)) { setJumpError(true); return }
-    go(clampPage(parseInt(trimmed, 10) - off, m)) // entered number is the SHOWN page
+    const page = parseJumpPage(jump, m)
+    if (page == null) { setJumpError(true); return }
+    go(page)
   }
 
   return (
@@ -63,7 +58,7 @@ export default function BrowseDrawer({ currentPage, cfg, onNavigate, onClose }) 
                         onClick={() => go(fp)}>
                   <span className="drawer-num">{s.number}</span>
                   <span className="drawer-name" dir="rtl">{s.name}</span>
-                  <span className="drawer-page">p.{shown(fp)}</span>
+                  <span className="drawer-page">p.{fp}</span>
                 </button>
               </li>
             )
@@ -80,7 +75,7 @@ export default function BrowseDrawer({ currentPage, cfg, onNavigate, onClose }) 
                 <button className="drawer-row" onClick={() => go(jp)}>
                   <span className="drawer-num">{j.number}</span>
                   <span className="drawer-name" dir="rtl">{j.name}</span>
-                  <span className="drawer-page">p.{shown(jp)}</span>
+                  <span className="drawer-page">p.{jp}</span>
                 </button>
               </li>
             )
@@ -91,10 +86,10 @@ export default function BrowseDrawer({ currentPage, cfg, onNavigate, onClose }) 
       {tab === 'page' && (
         <form className="drawer-jump" id="panel-page" role="tabpanel" aria-labelledby="tab-page"
               onSubmit={submitJump} noValidate>
-          <label htmlFor="jump-page">Go to page ({shown(1)}–{shown(cfg.totalPages)})</label>
+          <label htmlFor="jump-page">Go to page (1–{cfg.totalPages})</label>
           <div className="drawer-jump-row">
-            <input id="jump-page" type="number" inputMode="numeric" min={shown(1)} max={shown(cfg.totalPages)}
-                   value={jump} placeholder={String(shown(currentPage))}
+            <input id="jump-page" type="number" inputMode="numeric" min="1" max={cfg.totalPages}
+                   value={jump} placeholder={String(currentPage)}
                    onChange={(e) => { setJump(e.target.value); setJumpError(false) }} />
             <button type="submit">Go</button>
           </div>
