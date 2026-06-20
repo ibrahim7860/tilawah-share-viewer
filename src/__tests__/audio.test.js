@@ -1,12 +1,11 @@
 import { describe, it, expect, afterEach, vi } from 'vitest'
-import { fetchPageAudio, fetchReciters } from '../audio.js'
+import { fetchAyahsAudio, fetchReciters } from '../audio.js'
 
-const PAGE_AUDIO = {
-  pageNumber: 1,
+const AYAHS_AUDIO = {
   reciterId: 7,
   ayahs: [
-    { verseKey: '1:1', audioUrl: 'https://verses.quran.com/Alafasy/mp3/001001.mp3' },
-    { verseKey: '1:2', audioUrl: 'https://verses.quran.com/Alafasy/mp3/001002.mp3' },
+    { verseKey: '2:6', audioUrl: 'https://verses.quran.com/Alafasy/mp3/002006.mp3' },
+    { verseKey: '2:7', audioUrl: 'https://verses.quran.com/Alafasy/mp3/002007.mp3' },
   ],
 }
 
@@ -16,22 +15,32 @@ describe('audio.js', () => {
     vi.unstubAllGlobals()
   })
 
-  it('fetchPageAudio builds /api/quran/audio/page/{n}?reciterId={id}', async () => {
-    const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => PAGE_AUDIO })
+  it('fetchAyahsAudio builds /api/quran/audio/ayahs?reciterId=..&keys=.. (verse-key, IndoPak-safe)', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => AYAHS_AUDIO })
     vi.stubGlobal('fetch', fetchMock)
 
-    const result = await fetchPageAudio(1, 7)
+    const result = await fetchAyahsAudio(['2:6', '2:7'], 7)
 
     expect(result.ayahs).toHaveLength(2)
     const url = fetchMock.mock.calls[0][0]
-    expect(url).toContain('/api/quran/audio/page/1')
+    expect(url).toContain('/api/quran/audio/ayahs')
     expect(url).toContain('reciterId=7')
+    // keys joined with comma, url-encoded (the colon becomes %3A)
+    expect(url).toContain('keys=2%3A6%2C2%3A7')
   })
 
-  it('fetchPageAudio returns empty ayahs on non-ok response (never throws)', async () => {
+  it('fetchAyahsAudio returns empty ayahs on non-ok response (never throws)', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: false, status: 502 }))
-    const result = await fetchPageAudio(3, 7)
+    const result = await fetchAyahsAudio(['2:6'], 7)
     expect(result.ayahs).toEqual([])
+  })
+
+  it('fetchAyahsAudio short-circuits to empty (no fetch) when given no keys', async () => {
+    const fetchMock = vi.fn()
+    vi.stubGlobal('fetch', fetchMock)
+    const result = await fetchAyahsAudio([], 7)
+    expect(result.ayahs).toEqual([])
+    expect(fetchMock).not.toHaveBeenCalled()
   })
 
   it('fetchReciters returns parsed list on ok', async () => {

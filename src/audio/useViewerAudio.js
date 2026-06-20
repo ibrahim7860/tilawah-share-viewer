@@ -9,18 +9,22 @@ import { makeQueue, decideNext } from './queue.js'
 // page's ayahs; the caller loads that page's audio, flips the viewer page, and
 // restarts the queue (via start()). currentPage is read live through a ref so
 // decideNext always sees the page the queue belongs to.
-export function useViewerAudio({ onAyahChange, onNeedNextPage } = {}) {
+// maxPage is the active mushaf's last page (604 Madani / 847 IndoPak) — decideNext
+// must stop there, so it's threaded in via a ref (changes with cfg).
+export function useViewerAudio({ onAyahChange, onNeedNextPage, maxPage = 604 } = {}) {
   const audioRef = useRef(null)
   const prefetchRef = useRef(null)
   const queueRef = useRef({ ayahs: [], index: 0 })
   const currentPageRef = useRef(1)
+  const maxPageRef = useRef(maxPage)
   const onNeedNextPageRef = useRef(onNeedNextPage)
   const [isActive, setIsActive] = useState(false)
   const [isPlaying, setIsPlaying] = useState(false)
   const [verseKey, setVerseKey] = useState(null)
 
-  // Keep the latest onNeedNextPage without re-subscribing the `ended` listener.
+  // Keep the latest onNeedNextPage / maxPage without re-subscribing listeners.
   useEffect(() => { onNeedNextPageRef.current = onNeedNextPage }, [onNeedNextPage])
+  useEffect(() => { maxPageRef.current = maxPage }, [maxPage])
 
   // Lazily get/create the primary <audio> element (outside render to satisfy the
   // refs-during-render rule). The second, never-played element warms the
@@ -72,7 +76,7 @@ export function useViewerAudio({ onAyahChange, onNeedNextPage } = {}) {
   // Route page-end behavior through the pure decideNext: play the next ayah,
   // hand off to onNeedNextPage at a page boundary, or stop at the last page.
   const step = useCallback(() => {
-    const d = decideNext(queueRef.current, currentPageRef.current)
+    const d = decideNext(queueRef.current, currentPageRef.current, maxPageRef.current)
     if (d.action === 'play') { playIndex(d.queue.index); return }
     if (d.action === 'nextPage') {
       const cb = onNeedNextPageRef.current
@@ -100,12 +104,27 @@ export function useViewerAudio({ onAyahChange, onNeedNextPage } = {}) {
   const pause = useCallback(() => { audioRef.current?.pause(); setIsPlaying(false) }, [])
   const resume = useCallback(() => { audioRef.current?.play().then(() => setIsPlaying(true)).catch(() => {}) }, [])
   const next = useCallback(() => step(), [step])
-  const prev = useCallback(() => playIndex(queueRef.current.index - 1), [playIndex])
+  // Mirror the app's rewind: never go below the first ayah (index 0), keep
+  // playing it — playIndex(-1) would stop, which is wrong (N1).
+  const prev = useCallback(() => playIndex(Math.max(0, queueRef.current.index - 1)), [playIndex])
+
+  // Pause + release the src on BOTH the primary and prefetch elements so a closed
+  // player (or unmount) leaves no buffering/playing audio (I3/N3).
+  const releaseAudio = useCallback(() => {
+    for (const el of [audioRef.current, prefetchRef.current]) {
+      if (!el) continue
+      // jsdom doesn't implement pause()/load(); guard so teardown stays clean.
+      try { el.pause() } catch { /* noop */ }
+      el.removeAttribute('src')
+      try { el.load() } catch { /* noop */ }
+    }
+  }, [])
+
   const stop = useCallback(() => {
-    audioRef.current?.pause()
+    releaseAudio()
     setIsActive(false); setIsPlaying(false); setVerseKey(null)
     onAyahChange && onAyahChange(null)
-  }, [onAyahChange])
+  }, [onAyahChange, releaseAudio])
 
   useEffect(() => {
     const el = getAudio()
@@ -114,6 +133,9 @@ export function useViewerAudio({ onAyahChange, onNeedNextPage } = {}) {
     el.addEventListener('ended', onEnded)
     return () => el.removeEventListener('ended', onEnded)
   }, [step, getAudio])
+
+  // On unmount, stop and free both elements.
+  useEffect(() => () => releaseAudio(), [releaseAudio])
 
   return { start, setCurrentPage, pause, resume, next, prev, stop, isActive, isPlaying, verseKey }
 }

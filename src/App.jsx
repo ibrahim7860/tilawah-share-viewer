@@ -4,14 +4,14 @@ import { fetchMeta, fetchMistakes, addMistake, updateMistake, deleteMistake, Rev
 import { useActivityReporter } from './useActivityReporter.js'
 import { loadPage, fontFamilyFor, prefetchAround } from './quran/loadPage.js'
 import { clampPage } from './quran/nav.js'
-import { HIGHLIGHT_COLORS, isTemplate, wordInMark, wordVerse } from './quran/highlight.js'
+import { HIGHLIGHT_COLORS, isTemplate, wordInMark, wordVerse, pageVerseKeys } from './quran/highlight.js'
 import { getMushafConfig } from './quran/mushaf.js'
 import { upsertMark, removeMark, keyOf, applyWithRollback } from './state/marks.js'
 import { canApplySnapshot } from './state/liveSync.js'
 import Page from './components/Page.jsx'
 import AudioBar from './components/AudioBar.jsx'
 import { useViewerAudio } from './audio/useViewerAudio.js'
-import { fetchPageAudio, fetchReciters } from './audio.js'
+import { fetchAyahsAudio, fetchReciters } from './audio.js'
 import Header from './components/Header.jsx'
 import BrowseDrawer from './components/BrowseDrawer.jsx'
 import InstructionModal from './components/InstructionModal.jsx'
@@ -89,36 +89,57 @@ export default function App() {
   const [reciterPickerOpen, setReciterPickerOpen] = useState(false)
   const reciterIdRef = useRef(7)
   useEffect(() => { reciterIdRef.current = reciterId }, [reciterId])
+  // Mirror the active mushaf so the audio callbacks (recreated each render but
+  // captured by ref inside the hook) always read the current edition's bounds.
+  const cfgRef = useRef(cfg)
+  useEffect(() => { cfgRef.current = cfg }, [cfg])
 
   useEffect(() => {
     fetchReciters().then(({ reciters: list }) => { if (list?.length) setReciters(list) }).catch(() => {})
   }, [])
 
-  // onNeedNextPage: flip to the next page, load its audio, and continue the
-  // queue from its first ayah. A function with a `.load`/`.prefetch` shape so
-  // the hook can warm the next page early (Amendment 8).
+  // Ordered, distinct verse_keys on a given viewer page — fetched from the page
+  // JSON (cached after first load), edition-agnostic. Returns [] on any failure.
+  const verseKeysForPage = async (n) => {
+    try {
+      const data = await loadPage(n, cfgRef.current)
+      return pageVerseKeys(data)
+    } catch { return [] }
+  }
+
+  // onNeedNextPage: flip to the next page, fetch its ayah audio BY KEY, and
+  // continue the queue from its first ayah. A function with a `.load`/`.prefetch`
+  // shape so the hook can warm the next page early (Amendment 8).
   const loadNextPage = async (page) => {
-    if (page > cfg.totalPages) { viewerAudio.stop(); setAudioVisible(false); return }
+    if (page > cfgRef.current.totalPages) { viewerAudio.stop(); setAudioVisible(false); return }
     goToPage(page)
     viewerAudio.setCurrentPage(page)
-    const { ayahs } = await fetchPageAudio(page, reciterIdRef.current)
+    const keys = await verseKeysForPage(page)
+    const { ayahs } = await fetchAyahsAudio(keys, reciterIdRef.current)
     if (ayahs.length) viewerAudio.start(ayahs, ayahs[0].verseKey, page)
     else { viewerAudio.stop(); setAudioVisible(false) }
   }
   loadNextPage.load = loadNextPage
-  loadNextPage.prefetch = (page) => { if (page <= cfg.totalPages) fetchPageAudio(page, reciterIdRef.current).catch(() => {}) }
+  loadNextPage.prefetch = async (page) => {
+    if (page > cfgRef.current.totalPages) return
+    const keys = await verseKeysForPage(page)
+    fetchAyahsAudio(keys, reciterIdRef.current).catch(() => {})
+  }
 
   const viewerAudio = useViewerAudio({
     onAyahChange: (vk) => setActiveVerseKey(vk), // within a page no flip is needed (Amendment 1)
     onNeedNextPage: loadNextPage,
+    maxPage: cfg.totalPages, // 604 Madani / 847 IndoPak — decideNext stops here
   })
 
+  // Fetch the current page's ayahs BY KEY (IndoPak-safe) and start playback at
+  // `verseKey` (or the page's first ayah when null). start() clamps an unknown
+  // key to index 0.
   async function playFromVerse(verseKey) {
-    const { ayahs } = await fetchPageAudio(pageNumber, reciterId)
+    const keys = pageVerseKeys(page)
+    const { ayahs } = await fetchAyahsAudio(keys, reciterId)
     if (!ayahs.length) return
     setAudioVisible(true)
-    // Fall back to the first ayah on the page if the requested verseKey isn't in
-    // the returned set (start() already clamps unknown keys to index 0).
     viewerAudio.start(ayahs, verseKey ?? ayahs[0].verseKey, pageNumber)
   }
 
@@ -126,6 +147,24 @@ export default function App() {
   // IndoPak word-carried surah/ayah uniformly): just play the page's audio from
   // its first ayah.
   const playPageFromStart = () => playFromVerse(null)
+
+  // I1: changing the reciter mid-playback re-fetches the current page's ayahs
+  // with the new reciter and restarts at the verse currently playing, so the
+  // switch is audible immediately (skips initial mount; only acts while visible).
+  const didMountReciter = useRef(false)
+  useEffect(() => {
+    if (!didMountReciter.current) { didMountReciter.current = true; return }
+    if (!audioVisible) return
+    let active = true
+    const at = viewerAudio.verseKey
+    ;(async () => {
+      const keys = pageVerseKeys(page)
+      const { ayahs } = await fetchAyahsAudio(keys, reciterId)
+      if (active && ayahs.length) viewerAudio.start(ayahs, at ?? ayahs[0].verseKey, pageNumber)
+    })()
+    return () => { active = false }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- restart only on reciter change
+  }, [reciterId])
 
   // Touch page flipping on the mushaf itself (RTL flip: swipe right → next
   // page, swipe left → previous). Vertical scrolling stays native.

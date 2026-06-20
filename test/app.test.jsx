@@ -17,7 +17,7 @@ vi.mock('../src/api.js', () => ({
 // real network calls — same rationale as the api/loadPage mocks above.
 vi.mock('../src/audio.js', () => ({
   fetchReciters: vi.fn(() => Promise.resolve({ reciters: [{ id: 7, name: 'Mishary Rashid Alafasy', style: 'Murattal' }], defaultReciterId: 7 })),
-  fetchPageAudio: vi.fn(() => Promise.resolve({ pageNumber: 1, reciterId: 7, ayahs: [] })),
+  fetchAyahsAudio: vi.fn(() => Promise.resolve({ reciterId: 7, ayahs: [] })),
 }))
 
 import { addMistake, updateMistake, deleteMistake, fetchMistakes, fetchMeta, RevokedError } from '../src/api.js'
