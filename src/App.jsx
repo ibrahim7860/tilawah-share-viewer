@@ -86,7 +86,9 @@ export default function App() {
   const goToPage = (n) => setPageNumber(clampPage(n, cfg.id))
 
   // ---- Ayah audio playback ----------------------------------------------
-  const [audioVisible, setAudioVisible] = useState(false)
+  // The now-playing AudioBar is driven directly by viewerAudio.isActive (no
+  // separate visibility state): it appears when a clip plays and hides the moment
+  // playback ends — natural end included, which a separate flag used to miss.
   // True while startPlaybackAt is fetching (incl. the cold-start retry, up to
   // ~2.7s) before the first clip plays — drives the play-control spinner so the
   // user knows a tap registered and audio is on its way.
@@ -129,6 +131,10 @@ export default function App() {
   // continue the queue from its first ayah. A function with a `.load`/`.prefetch`
   // shape so the hook can warm the next page early (Amendment 8).
   const loadNextPage = async (page, lastKey) => {
+    // Auto-advance fires UNAWAITED from the audio hook, so capture the run-token:
+    // if the user stops / exits / taps elsewhere during the awaits below, that
+    // bumps playRunRef and we must NOT flip the page or resurrect playback.
+    const myRun = playRunRef.current
     // Find the next page that actually starts a NEW ayah. A spanning ayah repeats
     // as the next page's first key (skip it), and a long ayah can fill a whole
     // page with only its continuation (no new key) — skip those pages entirely so
@@ -137,10 +143,16 @@ export default function App() {
     let startKey = null
     while (p <= cfgRef.current.totalPages) {
       const keys = await verseKeysForPage(p)
+      if (playRunRef.current !== myRun) return // superseded (stop / exit / new tap)
+      // Empty = this page's data failed to load (every real page has ayahs). Stop
+      // rather than silently skipping its recitation — and rather than fan-firing
+      // failed loads all the way to the end of the mushaf.
+      if (keys.length === 0) { stopAudio(); return }
       startKey = firstNewKey(keys, lastKey)
       if (startKey) break
       p += 1
     }
+    if (playRunRef.current !== myRun) return
     if (!startKey) { stopAudio(); return } // ran off the end mid-ayah
     goToPage(p)
     viewerAudio.setCurrentPage(p)
@@ -163,7 +175,7 @@ export default function App() {
   })
 
   // Stop playback (and bump the run-token so any in-flight startPlaybackAt bails).
-  const stopAudio = () => { playRunRef.current++; viewerAudio.stop(); setAudioVisible(false); setAudioLoading(false) }
+  const stopAudio = () => { playRunRef.current++; viewerAudio.stop(); setAudioLoading(false) }
 
   // THE single playback entry point. All three callers route through it (user tap,
   // reciter switch, cross-page auto-advance), so the run-token, cold-start retry,
@@ -190,7 +202,6 @@ export default function App() {
     setAudioLoading(false)
     const decision = resolveAudioPlayback({ ayahs, verseKey })
     if (decision.action === 'play') {
-      setAudioVisible(true)
       viewerAudio.start(ayahs, decision.startKey, pageNum, single)
       return 'play'
     }
@@ -223,7 +234,7 @@ export default function App() {
   const didMountReciter = useRef(false)
   useEffect(() => {
     if (!didMountReciter.current) { didMountReciter.current = true; return }
-    if (!audioVisible) return
+    if (!viewerAudio.isActive) return
     // Route through the guarded path so a mid-playback reciter switch is
     // token-protected like every other play, and restarts at the current ayah
     // on the rendered page (loadedPage default).
@@ -515,7 +526,7 @@ export default function App() {
       </div>
       {!listenMode && (
       <nav className="pager"
-           style={audioVisible && audioBarHeight ? { bottom: audioBarHeight + 12 } : undefined}>
+           style={viewerAudio.isActive && audioBarHeight ? { bottom: audioBarHeight + 12 } : undefined}>
         <button className="pager-chevron" aria-label="Next page" disabled={pageNumber >= cfg.totalPages}
                 onClick={() => setPageNumber((p) => p + 1)}>‹</button>
         <button className="page-pill" onClick={() => setBrowseOpen(true)}>
@@ -561,7 +572,7 @@ export default function App() {
       )}
       {!listenMode && (
         <AudioBar
-          visible={audioVisible}
+          visible={viewerAudio.isActive}
           isPlaying={viewerAudio.isPlaying}
           verseKey={viewerAudio.verseKey}
           reciterName={(reciters.find((r) => r.id === reciterId) || {}).name || 'Reciter'}

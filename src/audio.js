@@ -13,15 +13,26 @@ const FALLBACK_RECITERS = [{ id: 7, name: 'Mishary Rashid Alafasy', style: 'Mura
 // DISTINCT keys on the page; the backend returns the requested keys in order.
 // Ayah audio is public Quran data; /api/quran/audio/** is permitAll and
 // CORS-allowed for this origin (no share token). Never throws; [] on failure.
+// Per-request timeout so a hung connection (not a failed one — fetch never
+// resolves on a TCP stall) can't pin the play spinner forever. On abort/failure
+// we return empty, which the caller's retry treats as a retry signal and, after
+// exhausting attempts, surfaces the "check your connection" toast. 9s matches the
+// backend's own upstream ceiling.
+const FETCH_TIMEOUT_MS = 9000
+
 export async function fetchAyahsAudio(keys, reciterId = 7) {
   if (!keys || !keys.length) return { reciterId, ayahs: [] }
+  const ctrl = new AbortController()
+  const timer = setTimeout(() => ctrl.abort(), FETCH_TIMEOUT_MS)
   try {
     const qs = `reciterId=${reciterId}&keys=${encodeURIComponent(keys.join(','))}`
-    const r = await fetch(`${API_BASE}/api/quran/audio/ayahs?${qs}`)
+    const r = await fetch(`${API_BASE}/api/quran/audio/ayahs?${qs}`, { signal: ctrl.signal })
     if (!r.ok) return { reciterId, ayahs: [] }
     return await r.json()
   } catch {
     return { reciterId, ayahs: [] }
+  } finally {
+    clearTimeout(timer)
   }
 }
 
