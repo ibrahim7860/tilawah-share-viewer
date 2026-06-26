@@ -4,11 +4,18 @@ import { fetchMeta, fetchMistakes, addMistake, updateMistake, deleteMistake, Rev
 import { useActivityReporter } from './useActivityReporter.js'
 import { loadPage, fontFamilyFor, prefetchAround } from './quran/loadPage.js'
 import { clampPage } from './quran/nav.js'
-import { HIGHLIGHT_COLORS, isTemplate, wordInMark, wordVerse } from './quran/highlight.js'
+import { HIGHLIGHT_COLORS, isTemplate, wordInMark, wordVerse, pageVerseKeys } from './quran/highlight.js'
 import { getMushafConfig } from './quran/mushaf.js'
 import { upsertMark, removeMark, keyOf, applyWithRollback } from './state/marks.js'
 import { canApplySnapshot } from './state/liveSync.js'
 import Page from './components/Page.jsx'
+import AudioBar from './components/AudioBar.jsx'
+import ListenPill from './components/ListenPill.jsx'
+import { useViewerAudio } from './audio/useViewerAudio.js'
+import { fetchAyahsAudio, fetchReciters } from './audio.js'
+import { resolveAudioPlayback } from './audio/resolveAudioPlayback.js'
+import { fetchAyahsWithRetry } from './audio/fetchWithRetry.js'
+import { firstNewKey } from './audio/queue.js'
 import Header from './components/Header.jsx'
 import BrowseDrawer from './components/BrowseDrawer.jsx'
 import InstructionModal from './components/InstructionModal.jsx'
@@ -77,6 +84,163 @@ export default function App() {
   const cfg = getMushafConfig(meta?.mushafPref)
 
   const goToPage = (n) => setPageNumber(clampPage(n, cfg.id))
+
+  // ---- Ayah audio playback ----------------------------------------------
+  // The now-playing AudioBar is driven directly by viewerAudio.isActive (no
+  // separate visibility state): it appears when a clip plays and hides the moment
+  // playback ends — natural end included, which a separate flag used to miss.
+  // True while startPlaybackAt is fetching (incl. the cold-start retry, up to
+  // ~2.7s) before the first clip plays — drives the play-control spinner so the
+  // user knows a tap registered and audio is on its way.
+  const [audioLoading, setAudioLoading] = useState(false)
+  // Listen mode: dismisses chrome, shows a floating pill, and makes a word tap
+  // PLAY (from that ayah onward) instead of marking a mistake. playRunRef is a
+  // generation token — every play/stop/exit bumps it, and an in-flight
+  // startPlaybackAt bails if a newer one superseded it (guards the cold-start
+  // retry window against stale start() calls).
+  const [listenMode, setListenMode] = useState(false)
+  // Measured height of the now-playing AudioBar, so the bottom pager can float
+  // just above it instead of being covered (both are bottom-fixed).
+  const [audioBarHeight, setAudioBarHeight] = useState(0)
+  const playRunRef = useRef(0)
+  const [reciterId, setReciterId] = useState(7)
+  const [reciters, setReciters] = useState([{ id: 7, name: 'Mishary Rashid Alafasy', style: 'Murattal' }])
+  const [activeVerseKey, setActiveVerseKey] = useState(null)
+  const [reciterPickerOpen, setReciterPickerOpen] = useState(false)
+  const reciterIdRef = useRef(7)
+  useEffect(() => { reciterIdRef.current = reciterId }, [reciterId])
+  // Mirror the active mushaf so the audio callbacks (recreated each render but
+  // captured by ref inside the hook) always read the current edition's bounds.
+  const cfgRef = useRef(cfg)
+  useEffect(() => { cfgRef.current = cfg }, [cfg])
+
+  useEffect(() => {
+    fetchReciters().then(({ reciters: list }) => { if (list?.length) setReciters(list) }).catch(() => {})
+  }, [])
+
+  // Ordered, distinct verse_keys on a given viewer page — fetched from the page
+  // JSON (cached after first load), edition-agnostic. Returns [] on any failure.
+  const verseKeysForPage = async (n) => {
+    try {
+      const data = await loadPage(n, cfgRef.current)
+      return pageVerseKeys(data)
+    } catch { return [] }
+  }
+
+  // onNeedNextPage: flip to the next page, fetch its ayah audio BY KEY, and
+  // continue the queue from its first ayah. A function with a `.load`/`.prefetch`
+  // shape so the hook can warm the next page early (Amendment 8).
+  const loadNextPage = async (page, lastKey) => {
+    // Auto-advance fires UNAWAITED from the audio hook, so capture the run-token:
+    // if the user stops / exits / taps elsewhere during the awaits below, that
+    // bumps playRunRef and we must NOT flip the page or resurrect playback.
+    const myRun = playRunRef.current
+    // Find the next page that actually starts a NEW ayah. A spanning ayah repeats
+    // as the next page's first key (skip it), and a long ayah can fill a whole
+    // page with only its continuation (no new key) — skip those pages entirely so
+    // we resume at the next unplayed ayah instead of re-reciting the boundary.
+    let p = page
+    let startKey = null
+    while (p <= cfgRef.current.totalPages) {
+      const keys = await verseKeysForPage(p)
+      if (playRunRef.current !== myRun) return // superseded (stop / exit / new tap)
+      // Empty = this page's data failed to load (every real page has ayahs). Stop
+      // rather than silently skipping its recitation — and rather than fan-firing
+      // failed loads all the way to the end of the mushaf.
+      if (keys.length === 0) { stopAudio(); return }
+      startKey = firstNewKey(keys, lastKey)
+      if (startKey) break
+      p += 1
+    }
+    if (playRunRef.current !== myRun) return
+    if (!startKey) { stopAudio(); return } // ran off the end mid-ayah
+    goToPage(p)
+    viewerAudio.setCurrentPage(p)
+    // Routes through the one guarded play path, so auto-advance inherits the
+    // cold-start retry. Only a real empty/no-audio stops it.
+    const action = await startPlaybackAt(startKey, p)
+    if (action === 'error' || action === 'noAudio') stopAudio()
+  }
+  loadNextPage.load = loadNextPage
+  loadNextPage.prefetch = async (page) => {
+    if (page > cfgRef.current.totalPages) return
+    const keys = await verseKeysForPage(page)
+    fetchAyahsAudio(keys, reciterIdRef.current).catch(() => {})
+  }
+
+  const viewerAudio = useViewerAudio({
+    onAyahChange: (vk) => setActiveVerseKey(vk), // within a page no flip is needed (Amendment 1)
+    onNeedNextPage: loadNextPage,
+    maxPage: cfg.totalPages, // 604 Madani / 847 IndoPak — decideNext stops here
+  })
+
+  // Stop playback (and bump the run-token so any in-flight startPlaybackAt bails).
+  const stopAudio = () => { playRunRef.current++; viewerAudio.stop(); setAudioLoading(false) }
+
+  // THE single playback entry point. All three callers route through it (user tap,
+  // reciter switch, cross-page auto-advance), so the run-token, cold-start retry,
+  // and play/error/noAudio decision live in exactly one place. Fetches the page's
+  // ayahs BY KEY (IndoPak-safe) with retry, then:
+  //   error   -> toast "check your connection"   (cold start / fetch failed)
+  //   noAudio -> toast "no recitation"           (key not on the page)
+  //   play    -> start the queue at startKey
+  // Returns the action ('play'|'error'|'noAudio'|'stale') so callers (auto-advance)
+  // can react. 'stale' means a newer call superseded this one — do NOT touch audio.
+  // pageNum defaults to loadedPage (the page actually rendered), NOT pageNumber
+  // (the flip target): a tapped word belongs to the rendered page, so during a
+  // mid-flip load they can differ and we must fetch the rendered page's audio.
+  // single=true plays ONLY that ayah then stops (Listen-mode tap); false plays
+  // the page onward with cross-page auto-advance (whole-page ▶ / reciter restart).
+  async function startPlaybackAt(verseKey, pageNum = loadedPage, single = false) {
+    const myRun = ++playRunRef.current
+    setAudioLoading(true)
+    const keys = await verseKeysForPage(pageNum)
+    const { ayahs } = await fetchAyahsWithRetry(fetchAyahsAudio, keys, reciterIdRef.current)
+    // Superseded by a newer tap (which owns the spinner now) or a stop (which
+    // already cleared it) — don't touch loading here.
+    if (playRunRef.current !== myRun) return 'stale'
+    setAudioLoading(false)
+    const decision = resolveAudioPlayback({ ayahs, verseKey })
+    if (decision.action === 'play') {
+      viewerAudio.start(ayahs, decision.startKey, pageNum, single)
+      return 'play'
+    }
+    if (decision.action === 'noAudio') showToast('No recitation available for this ayah.')
+    else showToast("Couldn't load audio — check your connection.")
+    return decision.action
+  }
+
+  // Tap-to-play on the current page (defaults to loadedPage — the rendered page).
+  const playFromVerse = (verseKey) => startPlaybackAt(verseKey)
+
+  // Listen-mode tap: play ONLY the tapped ayah, then stop (single=true).
+  const playAyahOnly = (verseKey) => startPlaybackAt(verseKey, loadedPage, true)
+
+  // Play from the start of the current page (reading-mode ▶ Page).
+  const playPageFromStart = () => playFromVerse(null)
+
+  // Listen mode: dismiss chrome + float the pill; exit restores chrome. Both stop
+  // any current playback (and bump the run-token) first.
+  const enterListenMode = () => {
+    stopAudio()
+    setBrowseOpen(false); setHelpOpen(false); setSelected(null); setReciterPickerOpen(false)
+    setListenMode(true)
+  }
+  const exitListenMode = () => { stopAudio(); setListenMode(false) }
+
+  // I1: changing the reciter mid-playback re-fetches the current page's ayahs
+  // with the new reciter and restarts at the verse currently playing, so the
+  // switch is audible immediately (skips initial mount; only acts while visible).
+  const didMountReciter = useRef(false)
+  useEffect(() => {
+    if (!didMountReciter.current) { didMountReciter.current = true; return }
+    if (!viewerAudio.isActive) return
+    // Route through the guarded path so a mid-playback reciter switch is
+    // token-protected like every other play, and restarts at the current ayah
+    // on the rendered page (loadedPage default).
+    startPlaybackAt(viewerAudio.verseKey)
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- restart only on reciter change
+  }, [reciterId])
 
   // Touch page flipping on the mushaf itself (RTL flip: swipe right → next
   // page, swipe left → previous). Vertical scrolling stays native.
@@ -248,6 +412,10 @@ export default function App() {
     return () => { active = false }
   }, [pageNumber, status, cfg])
 
+  // Keep the audio hook's notion of the current page in sync with manual flips
+  // so decideNext judges page boundaries against the visible page.
+  useEffect(() => { viewerAudio.setCurrentPage(pageNumber) }, [pageNumber, viewerAudio])
+
   if (status === 'badtoken') return <ErrorScreen kind="invalid" />
   if (status === 'revoked') return <ErrorScreen kind="revoked" />
   // Dormant since 2026-06-16 (Madani fallback) — kept so re-gating IndoPak is a
@@ -259,8 +427,8 @@ export default function App() {
   const verseKeyFor = (pg, word) => wordVerse(pg, word)
 
   const selectWord = (word, pg) => {
-    // A swipe that ends on a word also fires its click — swallow it.
-    if (Date.now() - swipedAt.current < 350) return
+    // Swipe-click swallow now lives in Page (one guard for both the mark and the
+    // Listen-mode play path) — see `wasSwipe` passed to <Page>.
     const existing = marks.find((mk) => wordInMark(pg, word, mk))
     setSelected({ word, existing })
   }
@@ -345,14 +513,20 @@ export default function App() {
 
   return (
     <div className="app">
-      <Header meta={meta} onBrowse={() => setBrowseOpen(true)} onHelp={() => setHelpOpen(true)} />
+      {!listenMode && <Header meta={meta} onBrowse={() => setBrowseOpen(true)} onHelp={() => setHelpOpen(true)} />}
       <div className="page-zone" ref={pageZoneRef}
            onTouchStart={onTouchStart} onTouchEnd={onTouchEnd} onPointerDown={onPointerDown}>
-        {page ? <Page page={page} pageNumber={loadedPage} cfg={cfg} marks={marks} preview={previewMark} onSelectWord={selectWord} />
+        {page ? <Page page={page} pageNumber={loadedPage} cfg={cfg} marks={marks} preview={previewMark} onSelectWord={selectWord}
+            activeVerseKey={activeVerseKey}
+            listenMode={listenMode}
+            wasSwipe={() => Date.now() - swipedAt.current < 350}
+            onPlayWord={(w, pg) => { const v = wordVerse(pg, w); if (v) playAyahOnly(`${v[0]}:${v[1]}`) }} />
           : pageError ? <div className="page-error" role="alert">Couldn't load this page. Try again.</div>
           : <div className="page-skeleton" />}
       </div>
-      <nav className="pager">
+      {!listenMode && (
+      <nav className="pager"
+           style={viewerAudio.isActive && audioBarHeight ? { bottom: audioBarHeight + 12 } : undefined}>
         <button className="pager-chevron" aria-label="Next page" disabled={pageNumber >= cfg.totalPages}
                 onClick={() => setPageNumber((p) => p + 1)}>‹</button>
         <button className="page-pill" onClick={() => setBrowseOpen(true)}>
@@ -360,7 +534,14 @@ export default function App() {
         </button>
         <button className="pager-chevron" aria-label="Previous page" disabled={pageNumber <= 1}
                 onClick={() => setPageNumber((p) => p - 1)}>›</button>
+        <button className="pager-chevron" aria-label={audioLoading ? 'Loading audio' : 'Play page recitation'}
+                onClick={playPageFromStart} aria-busy={audioLoading}>
+          {audioLoading ? <span className="audio-spinner" aria-hidden="true" /> : '▶'}
+        </button>
+        <button className="pager-chevron listen-toggle" aria-label="Listen mode"
+                onClick={enterListenMode}>🎧</button>
       </nav>
+      )}
       {browseOpen && (
         <BrowseDrawer currentPage={pageNumber} cfg={cfg} onNavigate={goToPage} onClose={() => setBrowseOpen(false)} />
       )}
@@ -378,6 +559,41 @@ export default function App() {
       )}
       {undo && <UndoSnackbar onUndo={undoDelete} onExpire={() => setUndo(null)} />}
       {toast && <div className="toast" role="status">{toast}</div>}
+      {reciterPickerOpen && (
+        <select
+          className="reciter-select"
+          value={reciterId}
+          onChange={(e) => { setReciterId(Number(e.target.value)); setReciterPickerOpen(false) }}
+          onBlur={() => setReciterPickerOpen(false)}
+          autoFocus
+        >
+          {reciters.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
+        </select>
+      )}
+      {!listenMode && (
+        <AudioBar
+          visible={viewerAudio.isActive}
+          isPlaying={viewerAudio.isPlaying}
+          verseKey={viewerAudio.verseKey}
+          reciterName={(reciters.find((r) => r.id === reciterId) || {}).name || 'Reciter'}
+          onPlayPause={() => (viewerAudio.isPlaying ? viewerAudio.pause() : viewerAudio.resume())}
+          onPrev={() => viewerAudio.prev()}
+          onNext={() => viewerAudio.next()}
+          onPickReciter={() => setReciterPickerOpen((o) => !o)}
+          onClose={stopAudio}
+          onMeasure={setAudioBarHeight}
+        />
+      )}
+      {listenMode && (
+        <ListenPill
+          isActive={viewerAudio.isActive}
+          isPlaying={viewerAudio.isPlaying}
+          loading={audioLoading}
+          onStop={stopAudio}
+          onPlayPause={() => (viewerAudio.isPlaying ? viewerAudio.pause() : viewerAudio.resume())}
+          onExit={exitListenMode}
+        />
+      )}
     </div>
   )
 }

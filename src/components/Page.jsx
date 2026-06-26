@@ -1,5 +1,5 @@
 import { useLayoutEffect, useMemo, useRef, useState } from 'react'
-import { wordBackground, wordInMark } from '../quran/highlight.js'
+import { wordBackground, wordInMark, wordVerse } from '../quran/highlight.js'
 import { buildLayout, surahName } from '../quran/mushafLayout.js'
 import { getMushafConfig, DEFAULT_MUSHAF } from '../quran/mushaf.js'
 
@@ -42,7 +42,7 @@ const SHORT_PAGE_MAX = 1.38
  * matching words live while the Edit Note modal is open — it never touches
  * `marks`, so dismissing the modal reverts it structurally.
  */
-export default function Page({ page, pageNumber, cfg = DEFAULT_CFG, marks, preview, onSelectWord }) {
+export default function Page({ page, pageNumber, cfg = DEFAULT_CFG, marks, preview, onSelectWord, onPlayWord, activeVerseKey, listenMode = false, wasSwipe }) {
   const lines = useMemo(() => buildLayout(page, pageNumber, cfg), [page, pageNumber, cfg])
   const family = cfg.fontFamilyFor(pageNumber)
   const totalLines = cfg.linesPerPage
@@ -122,14 +122,14 @@ export default function Page({ page, pageNumber, cfg = DEFAULT_CFG, marks, previ
     >
       {slots.map((l, i) => (
         <div className="mushaf-line" key={i}>
-          {l && <Line line={l} page={page} family={family} isIndoPak={isIndoPak} marks={marks} preview={preview} onSelectWord={onSelectWord} />}
+          {l && <Line line={l} page={page} family={family} isIndoPak={isIndoPak} marks={marks} preview={preview} onSelectWord={onSelectWord} onPlayWord={onPlayWord} activeVerseKey={activeVerseKey} listenMode={listenMode} wasSwipe={wasSwipe} />}
         </div>
       ))}
     </div>
   )
 }
 
-function Line({ line, page, family, isIndoPak, marks, preview, onSelectWord }) {
+function Line({ line, page, family, isIndoPak, marks, preview, onSelectWord, onPlayWord, activeVerseKey, listenMode, wasSwipe }) {
   if (line.kind === 'surah_name') {
     return (
       <div className="surah-banner">
@@ -140,10 +140,10 @@ function Line({ line, page, family, isIndoPak, marks, preview, onSelectWord }) {
   if (line.kind === 'basmallah') {
     return <div className="basmala">﷽</div>
   }
-  return <AyahLine line={line} page={page} family={family} isIndoPak={isIndoPak} marks={marks} preview={preview} onSelectWord={onSelectWord} />
+  return <AyahLine line={line} page={page} family={family} isIndoPak={isIndoPak} marks={marks} preview={preview} onSelectWord={onSelectWord} onPlayWord={onPlayWord} activeVerseKey={activeVerseKey} listenMode={listenMode} wasSwipe={wasSwipe} />
 }
 
-function AyahLine({ line, page, family, isIndoPak, marks, preview, onSelectWord }) {
+function AyahLine({ line, page, family, isIndoPak, marks, preview, onSelectWord, onPlayWord, activeVerseKey, listenMode, wasSwipe }) {
   const ref = useRef(null)
   // Madani: per-line SHRINK-ONLY fit, measured from the words' intrinsic widths so
   // it's independent of what's applied (no feedback loop). A dense QCF line whose
@@ -196,12 +196,23 @@ function AyahLine({ line, page, family, isIndoPak, marks, preview, onSelectWord 
         const bg = (preview && wordInMark(page, w, preview))
           ? preview.color
           : wordBackground(page, w, marks)
+        // Active recitation tint is lowest priority — applied via a class only
+        // when no mark/preview color already won (Amendment 5).
+        const sa = activeVerseKey ? wordVerse(page, w) : null
+        const isActive = !bg && sa && `${sa[0]}:${sa[1]}` === activeVerseKey
         return (
           <button
             key={w.id}
-            className="word"
+            className={isActive ? 'word word--audio-active' : 'word'}
             style={{ fontFamily: family, backgroundColor: bg || 'transparent' }}
-            onClick={() => onSelectWord(w, page)}
+            onClick={() => {
+              // A swipe/drag that ends on a word also fires its click — swallow it
+              // ONCE here, before the mark-vs-play branch, so BOTH paths are
+              // protected (Listen-mode play used to bypass the App-side guard).
+              if (wasSwipe && wasSwipe()) return
+              if (listenMode) { if (onPlayWord) onPlayWord(w, page) }
+              else { onSelectWord(w, page) }
+            }}
             aria-label="Qur'an word"
           >{w.text}</button>
         )

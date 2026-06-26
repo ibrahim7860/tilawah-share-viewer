@@ -36,6 +36,29 @@ export function wordVerse(page, word) {
   return verse ? verse.verse_key.split(':').map(Number) : null
 }
 
+/**
+ * Ordered, DISTINCT verse_keys ("surah:ayah") on a page, in reading order.
+ * Edition-agnostic: Madani pages carry `verses[]` (each with verse_key); IndoPak
+ * pages carry `lines[]` whose words carry verse_key (or surah/ayah). Used to fetch
+ * ayah audio by key — page numbers differ per edition, but verse_keys don't, so
+ * this is the IndoPak-safe input to fetchAyahsAudio.
+ */
+export function pageVerseKeys(page) {
+  const out = []
+  const seen = new Set()
+  const push = (key) => { if (key && !seen.has(key)) { seen.add(key); out.push(key) } }
+  if (page?.verses) {
+    for (const v of page.verses) push(v.verse_key)
+  } else if (page?.lines) {
+    for (const line of page.lines) {
+      for (const w of line.words || []) {
+        push(w.verse_key || (w.surah != null && w.ayah != null ? `${w.surah}:${w.ayah}` : null))
+      }
+    }
+  }
+  return out
+}
+
 /** True when a word falls inside a single mark's (surah, ayah, word-range). */
 export function wordInMark(page, word, mark) {
   if (!page || !mark) return false

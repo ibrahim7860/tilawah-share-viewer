@@ -37,6 +37,7 @@ export default function InstructionModal({ forceOpen = false, onClose }) {
         <li>Tap a word to mark a mistake</li>
         <li>Pick a category or write a note, then Save</li>
         <li>Changes save automatically</li>
+        <li>Tap 🎧 for Listen mode — then tap any ayah to hear it (▶ plays the whole page)</li>
       </ul>
       <ul className="legend" aria-label="Mistake categories">
         {TEMPLATES.map((t) => (
