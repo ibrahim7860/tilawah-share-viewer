@@ -81,7 +81,11 @@ export function useViewerAudio({ onAyahChange, onNeedNextPage, maxPage = 604 } =
     if (d.action === 'nextPage') {
       const cb = onNeedNextPageRef.current
       const fn = typeof cb === 'function' ? cb : cb?.load
-      if (fn) fn(d.page)
+      // Pass the just-played verse_key so the handoff resumes at the next
+      // UNPLAYED ayah (spanning ayahs repeat across the page break).
+      const q = queueRef.current
+      const lastKey = q.ayahs[q.index]?.verseKey
+      if (fn) fn(d.page, lastKey)
       return
     }
     // stop
@@ -90,9 +94,11 @@ export function useViewerAudio({ onAyahChange, onNeedNextPage, maxPage = 604 } =
     onAyahChange && onAyahChange(null)
   }, [playIndex, onAyahChange])
 
-  const start = useCallback((ayahs, startVerseKey, pageNumber) => {
+  // single=true plays only the start ayah then stops (Listen-mode tap); false
+  // plays the page onward + cross-page auto-advance (whole-page ▶).
+  const start = useCallback((ayahs, startVerseKey, pageNumber, single = false) => {
     if (pageNumber != null) currentPageRef.current = pageNumber
-    queueRef.current = makeQueue(ayahs, startVerseKey)
+    queueRef.current = makeQueue(ayahs, startVerseKey, single)
     setIsActive(true)
     playIndex(queueRef.current.index)
   }, [playIndex])
