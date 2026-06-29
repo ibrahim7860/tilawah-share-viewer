@@ -16,6 +16,10 @@ const fontCache = new Set()
 // Keyed by `${mushafId}:${pageNumber}` so the two editions never collide (a
 // session is single-mushaf, but keying by id keeps it correct regardless).
 const pageCache = new Map()
+// In-flight de-dupe: the slider mounts prev/current/next (and App warms the
+// current page) at once, so the same page can be requested concurrently before
+// it lands in pageCache. Share one promise per key so a page is fetched once.
+const inflight = new Map()
 const pageKey = (cfg, n) => `${cfg.id}:${n}`
 
 export async function loadPage(pageNumber, cfg = DEFAULT_CFG) {
@@ -28,15 +32,24 @@ export async function loadPage(pageNumber, cfg = DEFAULT_CFG) {
     await loadFont(cfg, pageNumber)
     return pageCache.get(key)
   }
-  const [data] = await Promise.all([
-    fetch(`${cfg.pagesDir}/p${pageNumber}.json`).then((r) => {
-      if (!r.ok) throw new Error(`page ${pageNumber} ${r.status}`)
-      return r.json()
-    }),
-    loadFont(cfg, pageNumber),
-  ])
-  pageCache.set(key, data)
-  return data
+  if (inflight.has(key)) return inflight.get(key)
+  const p = (async () => {
+    const [data] = await Promise.all([
+      fetch(`${cfg.pagesDir}/p${pageNumber}.json`).then((r) => {
+        if (!r.ok) throw new Error(`page ${pageNumber} ${r.status}`)
+        return r.json()
+      }),
+      loadFont(cfg, pageNumber),
+    ])
+    pageCache.set(key, data)
+    return data
+  })()
+  inflight.set(key, p)
+  try {
+    return await p
+  } finally {
+    inflight.delete(key)
+  }
 }
 
 async function loadFont(cfg, pageNumber) {
