@@ -211,6 +211,37 @@ button:active { opacity: 0.7; }
   touch-action: pan-y;           /* horizontal swipes flip pages */
 }
 
+/* ---------- Interactive 3-page drag slider ----------
+   The viewport clips to one page; the track holds prev/current/next side by
+   side (visual L→R order: next, current, prev) and is translateX'd to follow
+   the pointer 1:1, snapping on release (see components/PageSlider.jsx). The page
+   interiors keep their own dir="rtl"; the track is forced ltr so DOM order maps
+   to a predictable left-to-right geometry. */
+.page-slider {
+  width: min(100%, var(--page-col));
+  margin: 0 auto;
+  /* Clip ONLY the horizontal axis (off-screen neighbours). overflow-x:clip keeps
+     overflow-y:visible from coercing to auto, so tall page glyphs (basmalah /
+     surah-header headroom above the first line) can still spill instead of being
+     vertically cropped — avoids re-introducing the Madina top-clip bug class. */
+  overflow-x: clip;
+  overflow-y: visible;
+  touch-action: pan-y;           /* horizontal handled in JS; vertical stays native */
+}
+.page-slider-track {
+  display: flex;
+  direction: ltr;
+  align-items: flex-start;
+  gap: clamp(12px, 5vw, 40px);   /* the inter-page peek gap (mirrored into the snap math) */
+  will-change: transform;
+}
+/* Each slot is exactly one page-col wide; siblings overflow the clipped
+   viewport (flex-shrink 0 keeps them full width rather than squeezing to fit). */
+.page-slider-slot {
+  flex: 0 0 100%;
+  min-width: 0;
+}
+
 /* Short special pages: center occupied lines vertically. Each kept line takes
    its 1/N grid slot (Madani 15-line, IndoPak 13-line). */
 .page.page-centered { justify-content: center; }

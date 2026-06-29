@@ -8,7 +8,7 @@ import { HIGHLIGHT_COLORS, isTemplate, wordInMark, wordVerse, pageVerseKeys } fr
 import { getMushafConfig } from './quran/mushaf.js'
 import { upsertMark, removeMark, keyOf, applyWithRollback } from './state/marks.js'
 import { canApplySnapshot } from './state/liveSync.js'
-import Page from './components/Page.jsx'
+import PageSlider from './components/PageSlider.jsx'
 import AudioBar from './components/AudioBar.jsx'
 import ListenPill from './components/ListenPill.jsx'
 import { useViewerAudio } from './audio/useViewerAudio.js'
@@ -62,7 +62,6 @@ export default function App() {
   const [undo, setUndo] = useState(null)
   const [helpOpen, setHelpOpen] = useState(false)
   const [browseOpen, setBrowseOpen] = useState(false)
-  const [pageError, setPageError] = useState(false)
   const [toast, setToast] = useState(null)
   // Lazy one-time name capture: { resolve } while the prompt is open, else null.
   const [namePrompt, setNamePrompt] = useState(null)
@@ -242,50 +241,82 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps -- restart only on reciter change
   }, [reciterId])
 
-  // Touch page flipping on the mushaf itself (RTL flip: swipe right → next
-  // page, swipe left → previous). Vertical scrolling stays native.
-  const touchStart = useRef(null)
+  // Interactive page flipping (RTL flip: swipe/drag right → next page, left →
+  // previous). The gesture EVENTS live here on `.page-zone`, but the live
+  // translate + snap is owned by <PageSlider> (sliderRef): these handlers just
+  // turn DOM events into (dx, dy, vx) and forward them. Vertical drags stay
+  // native (the slider only claims clearly-horizontal gestures).
+  const sliderRef = useRef(null)
+  const dragRef = useRef(null) // { x, y, lastX, lastT } while a touch drag is live
   const swipedAt = useRef(0)
+  const markSwipe = () => { swipedAt.current = Date.now() } // swallow the trailing tap
+
   const onTouchStart = (e) => {
     swipedAt.current = 0 // a fresh touch ends the post-swipe click swallow
-    // Single-finger only: a pinch's second finger must not register as a
-    // swipe between two different fingers.
-    if (e.touches.length > 1) { touchStart.current = null; return }
+    // Single-finger only: a pinch's second finger must not register as a swipe.
+    if (e.touches.length > 1) { dragRef.current = null; return }
+    if (document.querySelector('[role="dialog"]')) { dragRef.current = null; return }
     const t = e.touches[0]
-    touchStart.current = { x: t.clientX, y: t.clientY }
+    dragRef.current = { x: t.clientX, y: t.clientY, lastX: t.clientX, lastT: e.timeStamp }
+  }
+  const onTouchMove = (e) => {
+    const s = dragRef.current
+    if (!s || e.touches.length > 1) return
+    const t = e.touches[0]
+    sliderRef.current?.dragMove(t.clientX - s.x, t.clientY - s.y)
+    s.lastX = t.clientX; s.lastT = e.timeStamp
   }
   const onTouchEnd = (e) => {
-    const s = touchStart.current
+    const s = dragRef.current
     if (e.touches.length > 0) return // other fingers still down (pinch)
-    touchStart.current = null
-    if (!s || document.querySelector('[role="dialog"]')) return
+    dragRef.current = null
+    if (!s) return
     const t = e.changedTouches[0]
-    const dx = t.clientX - s.x
-    const dy = t.clientY - s.y
-    if (Math.abs(dx) > 56 && Math.abs(dx) > 1.8 * Math.abs(dy)) {
-      swipedAt.current = Date.now()
-      setPageNumber((p) => clampPage(p + (dx > 0 ? 1 : -1), cfg.id))
-    }
+    const dt = e.timeStamp - s.lastT
+    const vx = dt > 0 ? (t.clientX - s.lastX) / dt : 0
+    sliderRef.current?.dragEnd(t.clientX - s.x, t.clientY - s.y, vx)
+  }
+  // touchcancel (incoming call, system gesture): clear the drag and spring the
+  // strip back, so it doesn't stay frozen mid-peek until the next tap.
+  const onTouchCancel = () => {
+    if (!dragRef.current) return
+    dragRef.current = null
+    sliderRef.current?.dragEnd(0, 0, 0)
   }
 
-  // Mouse drag flipping (desktop parity with the touch swipe — same RTL
-  // direction and thresholds). pointerType-gated so touch pointers stay with
-  // the touch handlers above and never double-fire.
+  // Mouse drag flipping (desktop parity). pointerType-gated so touch pointers
+  // stay with the touch handlers above and never double-fire. The drag may end
+  // outside the zone, so move/up are tracked on the window.
   const onPointerDown = (e) => {
     if (e.pointerType !== 'mouse' || e.button !== 0) return
     swipedAt.current = 0 // a fresh press ends the post-drag click swallow
-    const start = { x: e.clientX, y: e.clientY }
-    // The drag may end outside the zone (or even the window) — resolve it on
-    // a one-shot global pointerup instead of the zone's own.
-    window.addEventListener('pointerup', (up) => {
-      if (document.querySelector('[role="dialog"]')) return
-      const dx = up.clientX - start.x
-      const dy = up.clientY - start.y
-      if (Math.abs(dx) > 56 && Math.abs(dx) > 1.8 * Math.abs(dy)) {
-        swipedAt.current = Date.now() // the drag's trailing click must not mark a word
-        setPageNumber((p) => clampPage(p + (dx > 0 ? 1 : -1), cfg.id))
-      }
-    }, { once: true })
+    if (document.querySelector('[role="dialog"]')) return
+    const start = { x: e.clientX, y: e.clientY, lastX: e.clientX, lastT: e.timeStamp }
+    const move = (mv) => {
+      sliderRef.current?.dragMove(mv.clientX - start.x, mv.clientY - start.y)
+      start.lastX = mv.clientX; start.lastT = mv.timeStamp
+    }
+    const cleanup = () => {
+      window.removeEventListener('pointermove', move)
+      window.removeEventListener('pointerup', up)
+      window.removeEventListener('pointercancel', cancel)
+    }
+    const up = (u) => {
+      cleanup()
+      const dt = u.timeStamp - start.lastT
+      const vx = dt > 0 ? (u.clientX - start.lastX) / dt : 0
+      sliderRef.current?.dragEnd(u.clientX - start.x, u.clientY - start.y, vx)
+    }
+    // pointercancel (system gesture, browser takeover): spring back and, crucially,
+    // remove the window listeners so an interrupted drag doesn't leak `move` or
+    // freeze the strip mid-peek.
+    const cancel = () => {
+      cleanup()
+      sliderRef.current?.dragEnd(0, 0, 0)
+    }
+    window.addEventListener('pointermove', move)
+    window.addEventListener('pointerup', up)
+    window.addEventListener('pointercancel', cancel)
   }
 
   const showToast = (msg) => {
@@ -350,7 +381,7 @@ export default function App() {
         const dir = acc < 0 ? 1 : -1
         acc = 0
         lockedUntil = now + 250
-        setPageNumber((p) => clampPage(p + dir, cfg.id))
+        sliderRef.current?.slide(dir) // animate one page through the slider path
       }
     }
     zone.addEventListener('wheel', onWheel, { passive: false })
@@ -367,7 +398,7 @@ export default function App() {
       if (document.querySelector('[role="dialog"]')) return
       const tag = e.target?.tagName
       if (tag === 'INPUT' || tag === 'TEXTAREA') return
-      setPageNumber((p) => clampPage(p + (e.key === 'ArrowLeft' ? 1 : -1), cfg.id))
+      sliderRef.current?.slide(e.key === 'ArrowLeft' ? 1 : -1) // RTL: ← = next
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
@@ -403,12 +434,13 @@ export default function App() {
     loadPage(pageNumber, cfg)
       .then((d) => {
         if (!active) return
-        setPage(d); setLoadedPage(pageNumber); setPageError(false)
+        setPage(d); setLoadedPage(pageNumber)
         // Warm the neighbors so the next flip is instant (deployed parity with
         // local disk). Idle-scheduled and network-guarded inside prefetchAround.
+        // (The slider also self-loads neighbours; loadPage de-dupes in-flight.)
         prefetchAround(pageNumber, cfg)
       })
-      .catch(() => { if (active) { setPage(null); setPageError(true) } })
+      .catch(() => { if (active) setPage(null) })
     return () => { active = false }
   }, [pageNumber, status, cfg])
 
@@ -515,25 +547,27 @@ export default function App() {
     <div className="app">
       {!listenMode && <Header meta={meta} onBrowse={() => setBrowseOpen(true)} onHelp={() => setHelpOpen(true)} />}
       <div className="page-zone" ref={pageZoneRef}
-           onTouchStart={onTouchStart} onTouchEnd={onTouchEnd} onPointerDown={onPointerDown}>
-        {page ? <Page page={page} pageNumber={loadedPage} cfg={cfg} marks={marks} preview={previewMark} onSelectWord={selectWord}
-            activeVerseKey={activeVerseKey}
-            listenMode={listenMode}
-            wasSwipe={() => Date.now() - swipedAt.current < 350}
-            onPlayWord={(w, pg) => { const v = wordVerse(pg, w); if (v) playAyahOnly(`${v[0]}:${v[1]}`) }} />
-          : pageError ? <div className="page-error" role="alert">Couldn't load this page. Try again.</div>
+           onTouchStart={onTouchStart} onTouchMove={onTouchMove} onTouchEnd={onTouchEnd} onTouchCancel={onTouchCancel} onPointerDown={onPointerDown}>
+        {status === 'ready'
+          ? <PageSlider ref={sliderRef} currentPage={pageNumber} cfg={cfg}
+              onCommit={goToPage} onSwipe={markSwipe}
+              marks={marks} preview={previewMark} onSelectWord={selectWord}
+              activeVerseKey={activeVerseKey}
+              listenMode={listenMode}
+              wasSwipe={() => Date.now() - swipedAt.current < 350}
+              onPlayWord={(w, pg) => { const v = wordVerse(pg, w); if (v) playAyahOnly(`${v[0]}:${v[1]}`) }} />
           : <div className="page-skeleton" />}
       </div>
       {!listenMode && (
       <nav className="pager"
            style={viewerAudio.isActive && audioBarHeight ? { bottom: audioBarHeight + 12 } : undefined}>
         <button className="pager-chevron" aria-label="Next page" disabled={pageNumber >= cfg.totalPages}
-                onClick={() => setPageNumber((p) => p + 1)}>‹</button>
+                onClick={() => sliderRef.current?.slide(1)}>‹</button>
         <button className="page-pill" onClick={() => setBrowseOpen(true)}>
           Page {pageNumber}<span className="page-total"> / {cfg.totalPages}</span>
         </button>
         <button className="pager-chevron" aria-label="Previous page" disabled={pageNumber <= 1}
-                onClick={() => setPageNumber((p) => p - 1)}>›</button>
+                onClick={() => sliderRef.current?.slide(-1)}>›</button>
         <button className="pager-chevron" aria-label={audioLoading ? 'Loading audio' : 'Play page recitation'}
                 onClick={playPageFromStart} aria-busy={audioLoading}>
           {audioLoading ? <span className="audio-spinner" aria-hidden="true" /> : '▶'}
